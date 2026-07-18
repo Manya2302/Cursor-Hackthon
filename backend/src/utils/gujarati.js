@@ -104,29 +104,52 @@ function enrichParsedBill(parsed, ocrText = '') {
     parsed.items = parsed.items.map((item) => {
       if (!item) return item;
       const next = { ...item };
-      if (next.weight_text && (next.quantity == null || !next.unit)) {
+      // Never overwrite count/amount from the invoice pipeline
+      const hasBillCount =
+        next.count != null ||
+        (next.unit_price != null && next.line_amount != null);
+      if (
+        next.weight_text &&
+        !hasBillCount &&
+        (next.quantity == null || !next.unit)
+      ) {
         const w = parseWeightText(next.weight_text);
         if (next.quantity == null) next.quantity = w.quantity;
         if (!next.unit) next.unit = w.unit;
       }
       const name = String(next.name || '').trim();
       const nameLower = name.toLowerCase();
+      const base = String(next.base_name || name)
+        .toLowerCase()
+        .replace(/\d.*$/, '')
+        .trim();
       const hit = GUJARATI_ITEM_LEXICON.find((x) => {
         if (x.gu === name || x.en.toLowerCase() === nameLower) return true;
+        if (x.en.toLowerCase() === base) return true;
         return x.aliases.some((a) => {
           const al = String(a).toLowerCase();
-          return al === nameLower || nameLower.includes(al);
+          if (al.length < 3) return false; // avoid "g" matching inside Sugar
+          return al === nameLower || al === base;
         });
       });
       if (hit) {
         next.name_en = hit.en;
-        next.name = hit.gu;
+        if (containsGujarati(name)) {
+          next.base_name = hit.gu;
+        } else {
+          next.base_name = hit.en;
+        }
+        // Keep display name with pack (e.g. "Sugar 500gm")
+        if (!next.pack_text && !/\d/.test(name)) {
+          next.name = containsGujarati(name) ? hit.gu : hit.en;
+        }
       }
       return next;
     });
   }
 
-  // Prefer TOTAL from OCR template; if model total disagrees with sum of line amounts, use line sum.
+  // Prefer TOTAL from OCR template. Do NOT invent a total from line sums
+  // when they disagree — leave OCR total and let invoiceValidation flag mismatch.
   const lineSum = (parsed.items || []).reduce((s, i) => {
     const v = Number(i.line_amount);
     return s + (Number.isFinite(v) ? v : 0);
@@ -135,32 +158,16 @@ function enrichParsedBill(parsed, ocrText = '') {
   const ocrTotal = ocrTotalMatch ? Number(ocrTotalMatch[1]) : null;
 
   if (ocrTotal != null && Number.isFinite(ocrTotal)) {
-    if (lineSum > 0 && Math.abs(ocrTotal - lineSum) <= 1) {
+    if (parsed.total_amount == null) {
       parsed.total_amount = ocrTotal;
-    } else if (
-      lineSum > 0 &&
-      parsed.total_amount != null &&
-      Math.abs(Number(parsed.total_amount) - lineSum) > 1 &&
-      Math.abs(ocrTotal - lineSum) > 1
-    ) {
-      // Both disagree with lines — trust explicit line amounts (stated on bill)
-      parsed.total_amount = lineSum;
-      parsed.notes = [parsed.notes, 'total_reconciled_from_line_amounts']
-        .filter(Boolean)
-        .join(' | ');
-    } else if (parsed.total_amount == null) {
-      parsed.total_amount = ocrTotal;
-    } else if (lineSum > 0 && Math.abs(Number(parsed.total_amount) - lineSum) > 1) {
-      parsed.total_amount = lineSum;
-      parsed.notes = [parsed.notes, 'total_reconciled_from_line_amounts']
+    }
+    if (lineSum > 0 && Math.abs(ocrTotal - lineSum) > 0.5) {
+      parsed.notes = [parsed.notes, 'Total mismatch']
         .filter(Boolean)
         .join(' | ');
     }
-  } else if (
-    lineSum > 0 &&
-    (parsed.total_amount == null ||
-      Math.abs(Number(parsed.total_amount) - lineSum) > 1)
-  ) {
+  } else if (parsed.total_amount == null && lineSum > 0) {
+    // No OCR total — only then use stated line amounts as total
     parsed.total_amount = lineSum;
   }
 

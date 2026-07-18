@@ -1,14 +1,40 @@
 /**
- * Detect YES / NO confirmation replies for a pending extraction.
- * @returns {'yes' | 'no' | 'save_as_is' | null}
+ * Detect YES / NO / undo / update-price / add-products confirmation replies.
+ * @returns {'yes' | 'no' | 'save_as_is' | 'undo' | 'update_price' | 'add_products' | null}
  */
 function parseConfirmationReply(text) {
   if (!text || typeof text !== 'string') return null;
-  const t = text
-    .trim()
+  const raw = text.trim();
+  const t = raw
     .toLowerCase()
     .replace(/[!.,]+$/g, '')
     .trim();
+
+  // Thumbs-up emoji (and skin-tone variants) = YES
+  if (/^[\u{1F44D}\u{1F44C}](?:\u{1F3FB}|\u{1F3FC}|\u{1F3FD}|\u{1F3FE}|\u{1F3FF})?$/u.test(raw)) {
+    return 'yes';
+  }
+  if (/^(👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|👌)$/.test(raw)) {
+    return 'yes';
+  }
+
+  if (/^(undo|revert|rollback)$/i.test(t)) {
+    return 'undo';
+  }
+
+  if (
+    /^(update\s*price|update\s*prices|accept\s*and\s*update|update\s*master)$/i.test(
+      t
+    )
+  ) {
+    return 'update_price';
+  }
+
+  if (
+    /^(add\s*products?|add\s*product|create\s*products?)$/i.test(t)
+  ) {
+    return 'add_products';
+  }
 
   if (
     /^(save\s*as\s*is|saveasis|keep\s*as\s*is|accept\s*ocr)$/i.test(t) ||
@@ -64,15 +90,15 @@ function parseIdentityCorrection(text) {
   if (parseConfirmationReply(raw)) return null;
 
   const nameMatch = raw.match(
-    /(?:name|નામ|naam)\s*[:\-]?\s*(.+?)(?:\n|$)/i
-  );
+    /(?:name|નામ|naam|नाम)\s*[:\-]?\s*(.+?)(?=(?:\n|$)|(?:number|નંબર|nambar|phone|mobile))/i
+  ) || raw.match(/(?:name|નામ|naam|नाम)\s*[:\-]?\s*(.+?)(?:\n|$)/i);
   const numberMatch = raw.match(
-    /(?:number|phone|નંબર|mobile|mob)\s*[:\-]?\s*([0-9૦-૯\s\-]{8,15})/i
+    /(?:number|phone|નંબર|nambar|mobile|mob|नंबर)\s*[:\-]?\s*([0-9૦-૯\s\-]{8,20})/i
   );
 
   // Also accept: "Om Trivedi 9974099063" on one line if 10-digit phone present
   const loosePhone = raw.match(/(?<!\d)([6-9][0-9]{9})(?!\d)/);
-  const hasLabel = /name|number|નામ|નંબર|phone/i.test(raw);
+  const hasLabel = /name|number|નામ|નંબર|naam|nambar|phone|mobile/i.test(raw);
 
   if (!nameMatch && !numberMatch && !(hasLabel && loosePhone)) {
     return null;

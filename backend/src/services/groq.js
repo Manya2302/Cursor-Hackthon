@@ -2,6 +2,12 @@ const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const EXTRACTION_MODEL = 'llama-3.3-70b-versatile';
 const WHISPER_MODEL = 'whisper-large-v3';
+const WHISPER_FALLBACK_MODEL = 'whisper-large-v3-turbo';
+
+const GUJARATI_VOICE_PROMPT =
+  'નામ, નંબર, ખાંડ, ઘી, બટર, ચીઝ, દૂધ, કિલો, ગ્રામ, ટોટલ, રકમ. ' +
+  'Naam means name. Number means phone. Transcribe exact Gujarati words as spoken.';
+
 const CHAT_MODEL = 'llama-3.1-8b-instant';
 // Groq vision: llama-4-scout is no longer available on many accounts.
 // Use current multimodal model (same pipeline as main.py, updated model id).
@@ -22,17 +28,21 @@ Output JSON only — no markdown fences, no commentary.
 INTENTS (pick exactly one):
 - "transaction" — record a sale, purchase, payment, receipt, or expense in the books (customer bill/order chit with items + costs + TOTAL → sale; supplier invoice paid → purchase; settling udhaar → payment/receipt)
 - "inventory_bulk" — add/update products in the catalog/stock from a supplier list, stock sheet, price list, or PDF/image of products (caption may say supplier/stock). Put products in product_updates (and mirror key rows in items if helpful).
-- "statement_query" — they want a report/statement (P&L, balance, ledger, party balance)
-- "chat" — greeting, question, or help that is NOT a bookkeeping entry
+- "product_query" — ask about stock/quantity/price/details of a product in the catalog, or list products / low stock. NOT a P&L statement. Examples: "quantity of milk", "stock of sugar", "price of ghee", "send me product details of maggi", "list products"
+- "statement_query" — they want a financial report/statement (P&L, balance sheet, cashflow, ledger, party udhaar). Do NOT use for product stock/qty questions.
+- "chat" — greeting, question, or help that is NOT a bookkeeping entry and NOT a product catalog lookup
 - "unclear" — cannot tell without guessing
 
 STRICT RULES:
 - NEVER invent names, phones, products, amounts, or totals. Missing → null.
+- NEVER guess missing grocery rows to "complete" a bill.
+- NEVER duplicate an item unless the source text clearly repeats that row.
+- NEVER convert/translate Gujarati item names before extraction is done; keep script as written, put English gloss in name_en only after.
 - If OCR says NAME: UNREADABLE or NUMBER: UNREADABLE → party.name / party.phone must be null (do not guess).
 - If HEADER_CONFLICT: true appears → treat name/phone as unreliable; use null unless both passes clearly agree in the text.
-- NEVER calculate totals — copy TOTAL only if written.
+- NEVER calculate totals to fill gaps — copy TOTAL only if written. If TOTAL ≠ sum(line amounts), still copy TOTAL and note mismatch in notes.
 - NEVER convert units (500GM stays quantity 500 + unit "GM"; keep weight_text as written).
-- Extract EVERY product/item row — do not drop lines.
+- Extract EVERY product/item row — do not drop lines, do not merge adjacent rows.
 - Customer name+phone+items+costs+TOTAL on a chit → transaction / sale / party.role customer.
 - For Gujarati bills: keep party.name in Gujarati script; if NAME_EN is present and not UNREADABLE put it in name_en (and optionally notes like "name_en: Om Trivedi").
 - Phone NUMBER may use Gujarati digits — treat as the same phone once normalized to 0-9.
@@ -40,11 +50,12 @@ STRICT RULES:
 - Known Gujarati groceries: ખાંડ=Sugar, ઘી=Ghee, બટર=Butter, ચીઝ=Cheese, દૂધ=Milk (do not swap these).
 - Supplier / stock / price-list / "add products" with item rows → inventory_bulk; party.role supplier when a supplier is named.
 - PDF / CSV / Excel product or price lists with NO customer name → inventory_bulk (do not ask for customer name/phone).
-- Do NOT format a human reply — extraction only.
+- Questions about product quantity/stock/price/catalog → product_query (NOT statement_query, NOT chat). Put product name in product_query.name and ask type in product_query.action.
+- Do NOT format a human reply — extraction only. Output JSON only.
 
 JSON schema (always return all top-level keys):
 {
-  "intent": "transaction" | "inventory_bulk" | "statement_query" | "chat" | "unclear",
+  "intent": "transaction" | "inventory_bulk" | "product_query" | "statement_query" | "chat" | "unclear",
   "transaction_type": "sale" | "purchase" | "payment" | "receipt" | "expense" | null,
   "items": [
     {
@@ -80,51 +91,231 @@ JSON schema (always return all top-level keys):
       "category": string | null
     }
   ],
-  "statement": { "type": string | null, "period": string | null },
+  "product_query": {
+    "action": "stock" | "price" | "info" | "list" | "low_stock" | null,
+    "name": string | null,
+    "names": string[] | null
+  },
+  "statement": {
+    "statementType": "pnl" | "balance_sheet" | "cashflow" | "owners_equity" | "party_ledger" | "ledger_account" | "accounting_equation" | null,
+    "datePhrase": "today" | "this_week" | "this_month" | "last_month" | "last_3_months" | "this_year" | "previous_year" | "year_to_date" | "custom_range" | null,
+    "accountName": string | null,
+    "partyName": string | null,
+    "startDate": string | null,
+    "endDate": string | null,
+    "type": string | null,
+    "period": string | null
+  },
   "notes": string | null,
   "unclear_reason": string | null
-}`;
-
-function getApiKey() {
-  return (process.env.GROQ_API_KEY || '').trim();
 }
 
-async function chatCompletion({ messages, model, temperature = 0 }) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error('GROQ_API_KEY is not set');
-  }
+For product_query:
+- action=stock for quantity/qty/stock/how much left; price for selling/buy price; info for full product details; list for all products; low_stock for reorder alerts.
+- name = the product they asked about (e.g. milk, sugar, દૂધ). null for list/low_stock.
+- names = array when they ask about multiple products ("milk and sugar", "send me product of ghee and maggi"); otherwise null and use name.
+- Never invent stock or prices — backend will SQL-query Product Master.
+- "send me product of X" is product_query (info), NEVER statement_query / never a P&L report.
 
-  const res = await fetch(GROQ_CHAT_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model, messages, temperature }),
+For statement_query:
+- Map user ask to statementType (P&L / "statement" / નફો → pnl; balance sheet → balance_sheet; cash → cashflow; ledger of X → ledger_account with accountName; party udhaar → party_ledger with partyName; accounting equation → accounting_equation).
+- datePhrase from fixed enum only; put ISO dates in startDate/endDate ONLY when datePhrase is custom_range.
+- Never invent financial numbers — extraction only classifies the request.
+- Do NOT classify product stock questions as statement_query.`;
+
+const { getApiKey, getApiKeys, withGroqKey } = require('./groqKeys');
+
+async function chatCompletion({
+  messages,
+  model,
+  temperature = 0,
+  max_tokens = 1024,
+  retries = 2,
+}) {
+  return withGroqKey(async (apiKey, keyIndex) => {
+    let lastErr = null;
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const res = await fetch(GROQ_CHAT_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature,
+            max_tokens,
+          }),
+        });
+
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = body?.error?.message || `Groq chat failed (${res.status})`;
+          const waitMatch = msg.match(/try again in ([\d.]+)\s*s/i);
+          if (
+            res.status === 429 ||
+            /rate limit|tokens per minute|TPM/i.test(msg)
+          ) {
+            // Prefer switching to fallback key over waiting on same key
+            if (keyIndex < getApiKeys().length - 1) {
+              throw new Error(msg);
+            }
+            const waitSec = waitMatch
+              ? Math.ceil(Number(waitMatch[1]) + 0.5)
+              : 3 + attempt * 2;
+            console.warn(
+              `[groq] rate limit on key ${keyIndex + 1} — waiting ${waitSec}s`
+            );
+            await new Promise((r) => setTimeout(r, waitSec * 1000));
+            lastErr = new Error(msg);
+            continue;
+          }
+          throw new Error(msg);
+        }
+
+        return stripModelNoise(
+          body.choices?.[0]?.message?.content?.trim() || ''
+        );
+      } catch (err) {
+        lastErr = err;
+        const msg = String(err.message || err);
+        // Bubble rate-limit / auth up so withGroqKey can switch keys
+        if (
+          /rate limit|TPM|429|401|403|invalid.*api/i.test(msg) &&
+          keyIndex < getApiKeys().length - 1
+        ) {
+          throw err;
+        }
+        if (/rate limit|TPM|429/i.test(msg) && attempt < retries - 1) {
+          await new Promise((r) => setTimeout(r, (3 + attempt * 2) * 1000));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr || new Error('Groq chat failed');
   });
-
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(body?.error?.message || `Groq chat failed (${res.status})`);
-  }
-
-  return stripModelNoise(body.choices?.[0]?.message?.content?.trim() || '');
 }
 
-/** Remove Qwen/thinking dumps and cap runaway model output. */
+/**
+ * Pull structured bill lines out of noisy Qwen output (including inside <think>).
+ */
+function extractStructuredBill(text) {
+  const full = normalizeGujaratiDigitsSafe(String(text || ''));
+  const lines = [];
+
+  const lang = full.match(/\bLANG\s*:\s*(en|gu)\b/i)?.[1]?.toLowerCase() || null;
+  const name = full.match(/(?:^|\n)\s*NAME\s*:\s*(?!UNREADABLE)([^\n<]+)/i)?.[1]?.trim() || null;
+  const nameEn =
+    full.match(/(?:^|\n)\s*NAME_EN\s*:\s*(?!UNREADABLE)([^\n<]+)/i)?.[1]?.trim() || null;
+  let number =
+    full.match(/(?:^|\n)\s*NUMBER\s*:\s*([0-9૦-૯]{10})/i)?.[1] ||
+    full.match(/\bNUMBER\s*[:\-]?\s*([0-9૦-૯]{10})\b/i)?.[1] ||
+    null;
+  if (number) number = normalizeGujaratiDigitsSafe(number).replace(/\D/g, '');
+
+  const itemRe = /(?:^|\n)\s*ITEM\s*:\s*([^\n]+)/gi;
+  let m;
+  while ((m = itemRe.exec(full)) !== null) {
+    const body = m[1].trim();
+    if (body && !/^UNREADABLE$/i.test(body)) {
+      lines.push(`ITEM: ${body}`);
+    }
+  }
+
+  // Fallback: known grocery rows written without ITEM: prefix
+  if (lines.length === 0) {
+    const lex = [
+      'ખાંડ',
+      'ઘી',
+      'બટર',
+      'ચીઝ',
+      'દૂધ',
+      'Sugar',
+      'Ghee',
+      'Butter',
+      'Cheese',
+      'Milk',
+      'Maggi',
+      'Maggie',
+      'Tea',
+      'Oil',
+      'Rice',
+      'Atta',
+      'Flour',
+    ];
+    for (const nameItem of lex) {
+      const re = new RegExp(
+        `${nameItem}\\s*[,|\\-:]?\\s*(\\d+(?:\\.\\d+)?\\s*(?:kg|gm|g|ml|l|pcs|nos)?)?\\s*[,|\\-:]?\\s*(\\d{2,5})(?:\\s*Rs|\\s*₹)?`,
+        'i'
+      );
+      const hit = full.match(re);
+      if (hit) {
+        lines.push(
+          `ITEM: ${nameItem} | WEIGHT: ${hit[1] || ''} | AMOUNT: ${hit[2]}`
+        );
+      }
+    }
+  }
+
+  let total =
+    full.match(/(?:^|\n)\s*TOTAL\s*:\s*([0-9૦-૯]+(?:\.\d+)?)/i)?.[1] ||
+    full.match(/\b(?:TOTAL|ટોટલ)\s*[:\-]?\s*([0-9૦-૯]{2,6})/i)?.[1] ||
+    null;
+  if (total) total = normalizeGujaratiDigitsSafe(total).replace(/[^\d.]/g, '');
+
+  if (!total && lines.length) {
+    const sum = lines.reduce((s, line) => {
+      const a = line.match(/AMOUNT\s*:\s*([0-9]+(?:\.\d+)?)/i);
+      return s + (a ? Number(a[1]) : 0);
+    }, 0);
+    if (sum > 0) total = String(sum);
+  }
+
+  return {
+    lang,
+    name: name && !/^UNREADABLE$/i.test(name) ? name.replace(/[*"_`]/g, '').trim() : null,
+    nameEn: nameEn && !/^UNREADABLE$/i.test(nameEn) ? nameEn.trim() : null,
+    number: number && number.length === 10 ? number : null,
+    items: lines,
+    total,
+  };
+}
+
+/** Remove Qwen/thinking dumps — but keep any structured bill lines found inside. */
 function stripModelNoise(text) {
   if (!text) return '';
+  const structured = extractStructuredBill(text);
+  if (structured.items.length || structured.name || structured.number || structured.total) {
+    const out = [
+      structured.lang ? `LANG: ${structured.lang}` : null,
+      `NAME: ${structured.name || 'UNREADABLE'}`,
+      `NAME_EN: ${structured.nameEn || structured.name || 'UNREADABLE'}`,
+      `NUMBER: ${structured.number || 'UNREADABLE'}`,
+      ...structured.items,
+      `TOTAL: ${structured.total || 'UNREADABLE'}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return out;
+  }
+
   let cleaned = text
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
-    // Unclosed think blocks (common with qwen)
-    .replace(/<think>[\s\S]*$/gi, '')
-    .replace(/<thinking>[\s\S]*$/gi, '')
     .trim();
+  // Only strip unclosed think if something remains after removing the tag opener
+  if (/<think>/i.test(cleaned) && /(?:NAME|ITEM|TOTAL)\s*:/i.test(cleaned)) {
+    cleaned = cleaned.replace(/<\/?think>/gi, '\n');
+  } else {
+    cleaned = cleaned
+      .replace(/<think>[\s\S]*$/gi, '')
+      .replace(/<thinking>[\s\S]*$/gi, '');
+  }
 
-  // If noise remains but template lines exist, keep from first template key
-  const start = cleaned.search(/^(NAME|NAME_EN|NUMBER|ITEM|TOTAL)\s*:/im);
+  const start = cleaned.search(/^(LANG|NAME|NAME_EN|NUMBER|ITEM|TOTAL)\s*:/im);
   if (start > 0) cleaned = cleaned.slice(start);
 
   if (cleaned.length > 6000) {
@@ -202,33 +393,120 @@ async function extractIntent(rawText) {
 }
 
 /**
- * Whisper transcription only — returns plain transcript text.
- * Deliberately separate from extractIntent / reply formatting.
+ * Whisper transcription — Gujarati-first (language=gu), with retries/fallback.
+ * Returns plain transcript text (Gujarati/Hinglish as spoken).
  */
 async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
-  const apiKey = getApiKey();
-  if (!apiKey) {
+  const keys = getApiKeys();
+  if (!keys.length) {
     throw new Error('GROQ_API_KEY is not set');
   }
 
-  const ext = mimeType.includes('mp4')
-    ? 'mp4'
-    : mimeType.includes('mpeg')
-      ? 'mp3'
-      : mimeType.includes('wav')
-        ? 'wav'
-        : 'ogg';
+  if (audioBuffer && !Buffer.isBuffer(audioBuffer) && !(audioBuffer instanceof Uint8Array)) {
+    audioBuffer = Buffer.from(audioBuffer);
+  }
+  if (!audioBuffer || audioBuffer.length < 100) {
+    throw new Error('Voice note was empty or too short');
+  }
 
+  const rawMime = String(mimeType || 'audio/ogg').split(';')[0].trim().toLowerCase();
+  const mime =
+    rawMime.includes('mpeg') || rawMime.includes('mp3')
+      ? 'audio/mpeg'
+      : rawMime.includes('mp4') || rawMime.includes('m4a')
+        ? 'audio/mp4'
+        : rawMime.includes('wav')
+          ? 'audio/wav'
+          : rawMime.includes('webm')
+            ? 'audio/webm'
+            : 'audio/ogg';
+  const ext =
+    mime === 'audio/mpeg'
+      ? 'mp3'
+      : mime === 'audio/mp4'
+        ? 'mp4'
+        : mime === 'audio/wav'
+          ? 'wav'
+          : mime === 'audio/webm'
+            ? 'webm'
+            : 'ogg';
+
+  const attempts = [
+    { model: WHISPER_MODEL, language: 'gu', prompt: GUJARATI_VOICE_PROMPT },
+    { model: WHISPER_MODEL, language: 'gu', prompt: 'આ અવાજ નોંધ ગુજરાતીમાં છે. નામ અને નંબર સ્પષ્ટ લખો.' },
+    { model: WHISPER_FALLBACK_MODEL, language: 'gu', prompt: GUJARATI_VOICE_PROMPT },
+    { model: WHISPER_MODEL, language: undefined, prompt: GUJARATI_VOICE_PROMPT },
+  ];
+
+  let lastErr = null;
+  for (const apiKey of keys) {
+    for (let i = 0; i < attempts.length; i++) {
+      const cfg = attempts[i];
+      try {
+        if (i > 0) {
+          await new Promise((r) => setTimeout(r, 600 + i * 400));
+        }
+        const text = await whisperOnce({
+          apiKey,
+          audioBuffer,
+          mime,
+          ext,
+          model: cfg.model,
+          language: cfg.language,
+          prompt: cfg.prompt,
+        });
+        if (text && text.trim()) {
+          console.log(
+            `[groq] whisper ok model=${cfg.model} lang=${cfg.language || 'auto'} chars=${text.trim().length}`
+          );
+          return normalizeVoiceTranscript(text.trim());
+        }
+      } catch (err) {
+        lastErr = err;
+        console.error(
+          `[groq] whisper attempt failed:`,
+          String(err.message || err).slice(0, 200)
+        );
+        if (/401|403|invalid.*api|rate limit|TPM/i.test(String(err.message))) {
+          // Try next API key
+          break;
+        }
+      }
+    }
+  }
+
+  const msg = String(lastErr?.message || 'Whisper failed');
+  if (/internal_server_error|Internal Server Error|502|503|500/i.test(msg)) {
+    throw new Error(
+      'Voice service is busy. Please wait a few seconds and send the voice note again.'
+    );
+  }
+  throw new Error(msg.slice(0, 180));
+}
+
+async function whisperOnce({
+  apiKey,
+  audioBuffer,
+  mime,
+  ext,
+  model,
+  language,
+  prompt,
+}) {
   const form = new FormData();
-  form.append(
-    'file',
-    new Blob([audioBuffer], { type: mimeType || 'audio/ogg' }),
-    `audio.${ext}`
-  );
-  form.append('model', WHISPER_MODEL);
+  const bytes = Buffer.isBuffer(audioBuffer)
+    ? audioBuffer
+    : Buffer.from(audioBuffer);
+  // Prefer File when available (Node 20+) — more reliable than Blob for Groq
+  if (typeof File !== 'undefined') {
+    form.append('file', new File([bytes], `audio.${ext}`, { type: mime }));
+  } else {
+    form.append('file', new Blob([bytes], { type: mime }), `audio.${ext}`);
+  }
+  form.append('model', model);
   form.append('response_format', 'text');
-  // Gujarati-friendly hint (same idea as main.py); Whisper still auto-detects.
-  form.append('prompt', 'આ ઑડિઓ ગુજરાતી અથવા હિન્દી અથવા અંગ્રેજીમાં હોઈ શકે.');
+  if (language) form.append('language', language);
+  if (prompt) form.append('prompt', prompt);
 
   const res = await fetch(GROQ_TRANSCRIBE_URL, {
     method: 'POST',
@@ -240,51 +518,193 @@ async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
   if (!res.ok) {
     throw new Error(text || `Whisper failed (${res.status})`);
   }
-
-  return text;
+  // Sometimes API returns JSON even for text format on errors
+  if (text.startsWith('{') && /"error"/i.test(text)) {
+    throw new Error(text);
+  }
+  return text.replace(/^"|"$/g, '');
 }
 
 /**
- * Vision OCR router: detect bill language (en | gu), then run the matching OCR pipeline.
+ * Normalize spoken Gujarati/Hinglish voice notes into clear NAME:/NUMBER: cues
+ * so extraction + identity correction understand "naam" / "નામ" / "number".
+ */
+function normalizeVoiceTranscript(text) {
+  if (!text) return text;
+  let t = String(text).trim();
+
+  // Spoken labels → structured labels (keep Gujarati name words intact)
+  t = t.replace(
+    /(?:^|[\s,])(?:naam|name|નામ|नाम)\s*[:\-–]?\s*/gi,
+    '\nNAME: '
+  );
+  t = t.replace(
+    /(?:^|[\s,])(?:number|nambar|phone|mobile|મોબાઇલ|મોબાઈલ|નંબર|नंबर)\s*[:\-–]?\s*/gi,
+    '\nNUMBER: '
+  );
+
+  // "my name is X" / "મારું નામ X"
+  t = t.replace(
+    /(?:my\s+name\s+is|મારું\s*નામ|મારુ\s*નામ)\s+/gi,
+    '\nNAME: '
+  );
+
+  // Collapse spaces; keep newlines for NAME/NUMBER lines
+  t = t
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+
+  return t.trim();
+}
+
+/**
+ * Vision OCR — ONE vision call when possible (8000 TPM).
+ * No refine / no header crop unless identity is missing after first pass.
  */
 async function ocrImageText(imageBuffer, mimeType = 'image/jpeg') {
   const { dataUrl, headerDataUrl } = await prepareBillImages(imageBuffer, mimeType);
-  const lang = await detectBillLanguage(headerDataUrl || dataUrl);
+
+  let raw = await runBillVision(dataUrl);
+  let structured = extractStructuredBill(raw);
+  let lang =
+    structured.lang ||
+    (/\bLANG\s*:\s*gu\b/i.test(raw) ? 'gu' : null) ||
+    (require('../utils/gujarati').containsGujarati(raw) ? 'gu' : 'en');
+
+  // Only retry if zero items — wait for TPM window, use stricter prompt
+  if (!structured.items.length) {
+    console.log('[groq] no ITEM lines — waiting 3s then one retry…');
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      raw = await runBillVision(dataUrl, true);
+      structured = extractStructuredBill(raw);
+      lang =
+        structured.lang ||
+        (/\bLANG\s*:\s*gu\b/i.test(raw) ? 'gu' : lang || 'en');
+    } catch (err) {
+      console.error('[groq] OCR retry failed:', err.message.slice(0, 160));
+    }
+  }
+
+  lang = lang || 'en';
   console.log(`[groq] bill language detected: ${lang}`);
 
-  const text =
-    lang === 'gu'
-      ? await ocrGujaratiBill(dataUrl, headerDataUrl)
-      : await ocrEnglishBill(dataUrl, headerDataUrl);
+  // NEVER call refineGujaratiBillOcr here — burns TPM and invents rows.
+  let text = stripModelNoise(raw);
+  if (structured.items.length) {
+    text = [
+      `NAME: ${structured.name || 'UNREADABLE'}`,
+      `NAME_EN: ${structured.nameEn || 'UNREADABLE'}`,
+      `NUMBER: ${structured.number || 'UNREADABLE'}`,
+      ...structured.items,
+      `TOTAL: ${structured.total || 'UNREADABLE'}`,
+    ].join('\n');
+  }
 
-  return `${require('../utils/gujarati').normalizeGujaratiDigits(text)}\nBILL_LANG: ${lang}`;
+  const passRaw = extractOcrHeader(raw);
+  let pass1 = mergeIdentityPasses(extractOcrHeader(text), passRaw);
+  if (structured.name || structured.number) {
+    pass1 = mergeIdentityPasses(pass1, {
+      name: structured.name,
+      nameEn: structured.nameEn,
+      number: structured.number,
+    });
+  }
+
+  // Header crop ONLY if we have items but still missing BOTH name and phone
+  // (saves ~3k TPM on the common path)
+  let pass2 = { name: null, nameEn: null, number: null };
+  if (
+    headerDataUrl &&
+    structured.items.length > 0 &&
+    !pass1.name &&
+    !pass1.number
+  ) {
+    console.log('[groq] identity blank — header crop (1 call)…');
+    await new Promise((r) => setTimeout(r, 2500));
+    try {
+      pass2 = await ocrHeaderCropWithRetry(headerDataUrl, lang, 1);
+    } catch (err) {
+      console.error('[groq] header crop skipped:', err.message.slice(0, 120));
+    }
+  }
+
+  const merged = mergeIdentityPasses(pass1, pass2);
+  let out = rebuildCleanBillOcr(text, merged, raw);
+  if (merged.conflict) out += '\nHEADER_CONFLICT: true';
+  console.log(`[groq] identity merged=${JSON.stringify(merged)}`);
+  console.log('[groq] OCR:', out.slice(0, 500));
+  return `${require('../utils/gujarati').normalizeGujaratiDigits(out)}\nBILL_LANG: ${lang}`;
+}
+
+async function runBillVision(dataUrl, strictRetry = false) {
+  const prompt = strictRetry
+    ? 'STRICT OCR. Keep image language (en/gu).\n' +
+      'Table columns Item | Quantity | Price OR lines like Ghee-1kg-1-200.\n' +
+      'Output one line per product as: ITEM: Product-pack-count-lineTotal\n' +
+      'Example: ITEM: Ghee-1kg-1-200\nITEM: Sugar-500gm-2-250\nITEM: Milk-1kg-1-52\n' +
+      'Also: LANG / NAME / NUMBER / TOTAL. Never invent.'
+    : 'OCR handwritten kirana bill. Detect LANG en|gu.\n' +
+      'Header: Name + Number.\n' +
+      'Table often: Item | Quantity | Price\n' +
+      '  Ghee - 1kg | 1 | 200\n' +
+      '  Sugar - 500gm | 2 | 250\n' +
+      '  Milk - 1kg | 1 | 52\n' +
+      'Rewrite EACH row as: ITEM: <Product>-<pack>-<count>-<lineTotal>\n' +
+      'Examples:\n' +
+      'ITEM: Ghee-1kg-1-200\n' +
+      'ITEM: Sugar-500gm-2-250\n' +
+      'ITEM: Milk-1kg-1-52\n' +
+      'Also support compact: Ghee1kg-6-3000\n' +
+      'Rules: every row; never invent; never duplicate; Price column = line total.\n' +
+      'Output ONLY:\n' +
+      'LANG: en|gu\nNAME: ...\nNAME_EN: ...\nNUMBER: ...\n' +
+      'ITEM: Product-pack-count-total\nTOTAL: digits';
+
+  return chatCompletion({
+    model: VISION_MODEL,
+    temperature: 0,
+    max_tokens: 900,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: dataUrl } },
+          { type: 'text', text: prompt },
+        ],
+      },
+    ],
+  });
 }
 
 async function prepareBillImages(imageBuffer, mimeType = 'image/jpeg') {
   const safeMime = mimeType?.startsWith('image/') ? mimeType : 'image/jpeg';
   try {
     const sharp = require('sharp');
+    // Mild downscale — handwriting needs more pixels than before
     const jpeg = await sharp(imageBuffer)
       .rotate()
       .resize({ width: 1280, withoutEnlargement: true })
-      .jpeg({ quality: 85 })
+      .jpeg({ quality: 82 })
       .toBuffer();
     const dataUrl = `data:image/jpeg;base64,${jpeg.toString('base64')}`;
 
     const meta = await sharp(imageBuffer).rotate().metadata();
-    const w = meta.width || 1280;
-    const h = meta.height || 1280;
+    const w = meta.width || 960;
+    const h = meta.height || 960;
     const headerBuf = await sharp(imageBuffer)
       .rotate()
       .extract({
         left: 0,
         top: 0,
         width: w,
-        height: Math.max(80, Math.round(h * 0.32)),
+        height: Math.max(80, Math.round(h * 0.28)),
       })
       .normalize()
-      .resize({ width: Math.min(1200, w * 2), withoutEnlargement: false })
-      .jpeg({ quality: 88 })
+      .resize({ width: 960, withoutEnlargement: true })
+      .jpeg({ quality: 80 })
       .toBuffer();
     const headerDataUrl = `data:image/jpeg;base64,${headerBuf.toString('base64')}`;
     return { dataUrl, headerDataUrl };
@@ -297,18 +717,18 @@ async function prepareBillImages(imageBuffer, mimeType = 'image/jpeg') {
 
 /**
  * Tiny language classifier — English (Latin) vs Gujarati script.
+ * Prefer ocrImageText single-pass LANG line; this is a fallback helper.
  * @returns {'en' | 'gu'}
  */
 async function detectBillLanguage(dataUrl) {
   try {
-    // Smaller image for cheap TPM usage
     let tinyUrl = dataUrl;
     try {
       const sharp = require('sharp');
       const b64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       const tiny = await sharp(Buffer.from(b64, 'base64'))
-        .resize({ width: 640, withoutEnlargement: true })
-        .jpeg({ quality: 70 })
+        .resize({ width: 480, withoutEnlargement: true })
+        .jpeg({ quality: 60 })
         .toBuffer();
       tinyUrl = `data:image/jpeg;base64,${tiny.toString('base64')}`;
     } catch (_) {
@@ -325,28 +745,14 @@ async function detectBillLanguage(dataUrl) {
             { type: 'image_url', image_url: { url: tinyUrl } },
             {
               type: 'text',
-              text:
-                'Classify the LANGUAGE of this handwritten shop bill.\n' +
-                '- If most text is Latin/English letters (NAME, SUGAR, TOTAL, OM TRIVEDI) → en\n' +
-                '- If most text is Gujarati script (નામ, ખાંડ, ટોટલ, ઓમ) → gu\n' +
-                '- Mixed: pick the script used for NAME and item names.\n' +
-                'Reply with EXACTLY one line and nothing else:\n' +
-                'LANG: en\n' +
-                'or\n' +
-                'LANG: gu',
+              text: 'LANG: en or LANG: gu only. English letters→en, Gujarati script→gu.',
             },
           ],
         },
       ],
     });
     const cleaned = stripModelNoise(out);
-    if (/\bLANG\s*:\s*gu\b/i.test(cleaned) || /[\u0A80-\u0AFF]/.test(cleaned)) {
-      // Only trust gu from LANG tag, not from accidental Gujarati in thinking
-      if (/\bLANG\s*:\s*gu\b/i.test(cleaned)) return 'gu';
-    }
-    if (/\bLANG\s*:\s*en\b/i.test(cleaned)) return 'en';
-    // Fallback heuristics from model free text
-    if (/gujarati|ગુજરાતી/i.test(cleaned)) return 'gu';
+    if (/\bLANG\s*:\s*gu\b/i.test(cleaned)) return 'gu';
     return 'en';
   } catch (err) {
     console.error('[groq] detectBillLanguage failed:', err.message);
@@ -355,6 +761,7 @@ async function detectBillLanguage(dataUrl) {
 }
 
 async function ocrEnglishBill(dataUrl, headerDataUrl) {
+  // Kept for direct calls; prefer ocrImageText single-pass.
   const raw = await chatCompletion({
     model: VISION_MODEL,
     temperature: 0,
@@ -366,35 +773,20 @@ async function ocrEnglishBill(dataUrl, headerDataUrl) {
           {
             type: 'text',
             text:
-              'Read this HANDWRITTEN ENGLISH shop bill (red/blue ink).\n' +
-              'Labels are like NAME, NUMBER, ITEMS, WEIGHT, COST, TOTAL.\n' +
-              'Copy NAME and NUMBER exactly (e.g. OM TRIVEDI, 9974099063).\n' +
-              'Ignore crossed-out / struck text above the main bill.\n' +
-              'Do not invent. If unreadable: UNREADABLE.\n\n' +
-              'Output EXACTLY (plain text):\n' +
-              'NAME: <English name>\n' +
-              'NAME_EN: <same>\n' +
-              'NUMBER: <10 digits>\n' +
-              'ITEM: <name> | WEIGHT: <as written> | AMOUNT: <digits>\n' +
-              'TOTAL: <digits>',
+              'Read ENGLISH handwritten bill. Output:\n' +
+              'NAME:\nNAME_EN:\nNUMBER:\nITEM: … | WEIGHT: … | AMOUNT: …\nTOTAL:',
           },
         ],
       },
     ],
   });
-
-  const passRaw = extractOcrHeader(raw);
-  const text = stripModelNoise(raw);
-  const pass1 = mergeIdentityPasses(extractOcrHeader(text), passRaw);
-  const pass2 = headerDataUrl
-    ? await ocrHeaderCropWithRetry(headerDataUrl, 'en')
-    : { name: null, nameEn: null, number: null };
+  const pass1 = extractOcrHeader(raw);
+  const pass2 =
+    headerDataUrl && (!pass1.name || !pass1.number)
+      ? await ocrHeaderCropWithRetry(headerDataUrl, 'en', 1)
+      : { name: null, nameEn: null, number: null };
   const merged = mergeIdentityPasses(pass1, pass2);
-  let out = rebuildCleanBillOcr(text, merged, raw);
-  if (merged.conflict) out += '\nHEADER_CONFLICT: true';
-  console.log(`[groq] EN identity merged=${JSON.stringify(merged)}`);
-  console.log('[groq] EN OCR:', out.slice(0, 400));
-  return out;
+  return rebuildCleanBillOcr(stripModelNoise(raw), merged, raw);
 }
 
 async function ocrGujaratiBill(dataUrl, headerDataUrl) {
@@ -409,52 +801,35 @@ async function ocrGujaratiBill(dataUrl, headerDataUrl) {
           {
             type: 'text',
             text:
-              'Read this HANDWRITTEN GUJARATI shop bill (red/blue ink).\n' +
-              'Labels: નામ/NAME, નંબર/NUMBER, વજન, રકમ, ટોટલ.\n' +
-              'Keep person names in Gujarati script. Digits may be ૦-૯ — convert phone/amounts to ASCII 0-9.\n' +
-              'Copy carefully. Do not invent common Indian names. If unsure: UNREADABLE.\n\n' +
-              'Output EXACTLY (plain text):\n' +
-              'NAME: <Gujarati name>\n' +
-              'NAME_EN: <English transliteration or UNREADABLE>\n' +
-              'NUMBER: <10 ASCII digits>\n' +
-              'ITEM: <Gujarati item> | WEIGHT: <as written> | AMOUNT: <ASCII digits>\n' +
-              'TOTAL: <ASCII digits>\n\n' +
-              'Lexicon: ખાંડ=Sugar, ઘી=Ghee, બટર=Butter, ચીઝ=Cheese, દૂધ=Milk.',
+              'Read GUJARATI handwritten bill. Digits ૦-૯→ASCII. Output:\n' +
+              'NAME:\nNAME_EN:\nNUMBER:\nITEM: … | WEIGHT: … | AMOUNT: …\nTOTAL:',
           },
         ],
       },
     ],
   });
-
-  const passRaw = extractOcrHeader(raw);
-  let text = await refineGujaratiBillOcr(raw);
-  const pass1 = mergeIdentityPasses(extractOcrHeader(text), passRaw);
-  const pass2 = headerDataUrl
-    ? await ocrHeaderCropWithRetry(headerDataUrl, 'gu')
-    : { name: null, nameEn: null, number: null };
+  const text = await refineGujaratiBillOcr(raw);
+  const pass1 = mergeIdentityPasses(extractOcrHeader(text), extractOcrHeader(raw));
+  const pass2 =
+    headerDataUrl && (!pass1.name || !pass1.number)
+      ? await ocrHeaderCropWithRetry(headerDataUrl, 'gu', 1)
+      : { name: null, nameEn: null, number: null };
   const merged = mergeIdentityPasses(pass1, pass2);
-  let out = rebuildCleanBillOcr(text, merged, raw);
-  if (merged.conflict) out += '\nHEADER_CONFLICT: true';
-  console.log(`[groq] GU identity merged=${JSON.stringify(merged)}`);
-  console.log('[groq] GU OCR:', out.slice(0, 400));
-  return out;
+  return rebuildCleanBillOcr(text, merged, raw);
 }
 
-async function ocrHeaderCropWithRetry(headerDataUrl, lang = 'en', attempts = 2) {
+async function ocrHeaderCropWithRetry(headerDataUrl, lang = 'en', attempts = 1) {
   const prompt =
     lang === 'gu'
-      ? 'This is the TOP of a handwritten GUJARATI bill. Read ONLY નામ/NAME and નંબર/NUMBER.\n' +
-        'Keep name in Gujarati if written that way. Phone: 10 ASCII digits (convert ૦-૯).\n' +
-        'Do not invent. Output ONLY:\nNAME: ...\nNAME_EN: ...\nNUMBER: <10 digits or UNREADABLE>'
-      : 'This is the TOP of a handwritten ENGLISH bill. Read ONLY NAME and NUMBER.\n' +
-        'Example: NAME: OM TRIVEDI  NUMBER: 9974099063\n' +
-        'Copy exactly. Output ONLY:\nNAME: ...\nNAME_EN: ...\nNUMBER: <10 digits or UNREADABLE>';
+      ? 'TOP of GUJARATI bill only. Output:\nNAME: ...\nNAME_EN: ...\nNUMBER: <10 digits or UNREADABLE>'
+      : 'TOP of ENGLISH bill only. Output:\nNAME: ...\nNAME_EN: ...\nNUMBER: <10 digits or UNREADABLE>';
 
   for (let i = 0; i < attempts; i++) {
     try {
       const headerRaw = await chatCompletion({
         model: VISION_MODEL,
         temperature: 0,
+        max_tokens: 200,
         messages: [
           {
             role: 'user',
@@ -470,13 +845,15 @@ async function ocrHeaderCropWithRetry(headerDataUrl, lang = 'en', attempts = 2) 
       const msg = err.message || '';
       const waitMatch = msg.match(/try again in ([\d.]+)s/i);
       const waitMs = waitMatch
-        ? Math.ceil(Number(waitMatch[1]) * 1000) + 500
-        : 8000;
-      console.error(`[groq] header crop OCR failed (try ${i + 1}):`, msg.slice(0, 180));
+        ? Math.min(25000, Math.ceil(Number(waitMatch[1]) * 1000) + 800)
+        : 12000;
+      console.error(`[groq] header crop OCR failed (try ${i + 1}):`, msg.slice(0, 160));
       if (i < attempts - 1 && /rate limit|tpm|tokens per minute/i.test(msg)) {
+        console.log(`[groq] waiting ${Math.round(waitMs / 1000)}s for TPM…`);
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
+      // Don't burn more TPM — continue with main OCR identity only
       return { name: null, nameEn: null, number: null };
     }
   }
@@ -485,37 +862,20 @@ async function ocrHeaderCropWithRetry(headerDataUrl, lang = 'en', attempts = 2) 
 
 /** Keep only structured bill lines so thinking dumps never reach the agent. */
 function rebuildCleanBillOcr(billText, header, rawFallback = '') {
-  const sources = [
-    stripModelNoise(billText || ''),
-    stripModelNoise(rawFallback || ''),
-    normalizeGujaratiDigitsSafe(String(rawFallback || '')),
-  ];
-
-  let items = [];
-  let total = null;
-  for (const src of sources) {
-    const found = src
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => /^ITEM\s*:/i.test(l));
-    if (found.length && items.length === 0) items = found;
-    const t = src.match(/(?:^|\n)\s*TOTAL\s*:\s*([0-9]+(?:\.\d+)?)/im)?.[1]?.trim();
-    if (t && !total) total = t;
-  }
-
-  // Fallback: sum line amounts if TOTAL missing
-  if (!total && items.length) {
-    const sum = items.reduce((s, line) => {
-      const m = line.match(/AMOUNT\s*:\s*([0-9]+(?:\.\d+)?)/i);
-      return s + (m ? Number(m[1]) : 0);
-    }, 0);
-    if (sum > 0) total = String(sum);
-  }
+  const fromRaw = extractStructuredBill(rawFallback);
+  const fromBill = extractStructuredBill(billText);
+  const items =
+    fromBill.items.length > 0
+      ? fromBill.items
+      : fromRaw.items.length > 0
+        ? fromRaw.items
+        : [];
+  const total = fromBill.total || fromRaw.total || null;
 
   const lines = [
-    `NAME: ${header.name || 'UNREADABLE'}`,
-    `NAME_EN: ${header.nameEn || header.name || 'UNREADABLE'}`,
-    `NUMBER: ${header.number || 'UNREADABLE'}`,
+    `NAME: ${header.name || fromBill.name || fromRaw.name || 'UNREADABLE'}`,
+    `NAME_EN: ${header.nameEn || header.name || fromBill.nameEn || fromRaw.nameEn || fromBill.name || fromRaw.name || 'UNREADABLE'}`,
+    `NUMBER: ${header.number || fromBill.number || fromRaw.number || 'UNREADABLE'}`,
     ...items,
     `TOTAL: ${total || 'UNREADABLE'}`,
   ];

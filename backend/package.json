@@ -7,7 +7,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test:sarvam": "node scripts/smoke-sarvam.js",
-    "test:gujarati": "node scripts/smoke-gujarati.js"
+    "test:gujarati": "node scripts/smoke-gujarati.js",
+    "seed": "node scripts/seedDemoData.js"
   },
   "engines": {
     "node": ">=20"
@@ -16,10 +17,13 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",
     "cors": "^2.8.6",
+    "dayjs": "^1.11.21",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "morgan": "^1.11.0",
+    "papaparse": "^5.5.4",
     "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.15.2",
     "pg": "^8.22.0",
     "sarvamai": "^1.1.7",
     "sharp": "^0.35.3",

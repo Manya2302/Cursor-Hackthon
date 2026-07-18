@@ -3,6 +3,7 @@ import { useAuth } from './auth/AuthContext'
 import Register from './pages/Register'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import StatementViewer from './pages/StatementViewer'
 
 function ProtectedRoute({ children }) {
   const { session } = useAuth()
@@ -41,6 +42,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/statements"
+        element={
+          <ProtectedRoute>
+            <StatementViewer />
           </ProtectedRoute>
         }
       />

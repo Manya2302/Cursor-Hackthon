@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { upsertProducts } = require('./inventoryUpsert');
 
 let pool = null;
 
@@ -22,18 +23,31 @@ function productIdFor(vendorId, name) {
  * Normalize product rows from either product_updates or items[].
  */
 function collectProductRows(parsed) {
+  // Structured Phase 5 bulk import
+  if (Array.isArray(parsed.bulk_rows) && parsed.bulk_rows.length) {
+    return parsed.bulk_rows.map((r) => ({
+      productId: r.productId || r.id,
+      name: r.name || r.product_name,
+      stock: r.stock != null ? Number(r.stock) : null,
+      price: r.price != null ? Number(r.price) : null,
+      category: r.category || null,
+      supplier: r.supplier || null,
+    }));
+  }
+
   const rows = [];
   const updates = Array.isArray(parsed.product_updates)
     ? parsed.product_updates
     : [];
   for (const p of updates) {
-    if (!p?.name) continue;
+    if (!p?.name && !p?.productId) continue;
     rows.push({
+      productId: p.productId || p.id || null,
       name: p.name,
       stock: p.stock != null ? Number(p.stock) : null,
       price: p.price != null ? Number(p.price) : null,
       category: p.category || null,
-      supplier: parsed.party?.name || null,
+      supplier: p.supplier || parsed.party?.name || null,
     });
   }
 
@@ -42,6 +56,7 @@ function collectProductRows(parsed) {
     for (const item of parsed.items) {
       if (!item?.name) continue;
       rows.push({
+        productId: item.productId || item.id || null,
         name: item.name,
         stock: item.quantity != null ? Number(item.quantity) : null,
         price:
@@ -61,11 +76,9 @@ function collectProductRows(parsed) {
 
 /**
  * Upsert products from a confirmed inventory/supplier extraction.
+ * Uses Phase 5 semantics: set absolute stock; ledger only on change; no ledger for brand-new.
  */
 async function postInventory(vendorId, extraction) {
-  const pg = getPool();
-  if (!pg) throw new Error('Database not configured');
-
   const parsed =
     typeof extraction.llm_parsed === 'string'
       ? JSON.parse(extraction.llm_parsed)
@@ -76,86 +89,71 @@ async function postInventory(vendorId, extraction) {
     throw new Error('No products found to save');
   }
 
-  const client = await pg.connect();
-  const saved = [];
-
-  try {
-    await client.query('begin');
-
-    for (const row of rows) {
-      const id = productIdFor(vendorId, row.name);
-      const stock = Number.isFinite(row.stock) ? row.stock : 0;
-      const price = Number.isFinite(row.price) ? row.price : 0;
-
-      const existing = await client.query(
-        `select id, stock from products where id = $1`,
-        [id]
-      );
-
-      let newStock;
-      if (existing.rows[0]) {
-        // Add incoming stock onto existing level when quantity is provided
-        newStock =
-          row.stock != null
-            ? Number(existing.rows[0].stock) + stock
-            : Number(existing.rows[0].stock);
-
-        await client.query(
-          `update products
-              set product_name = $2,
-                  stock = $3,
-                  price = case when $4 > 0 then $4 else price end,
-                  category = coalesce($5, category),
-                  supplier = coalesce($6, supplier),
-                  last_updated = now()
-            where id = $1`,
-          [id, row.name, newStock, price, row.category, row.supplier]
-        );
-      } else {
-        newStock = stock;
-        await client.query(
-          `insert into products
-             (id, vendor_id, product_name, category, stock, price, supplier, last_updated)
-           values ($1, $2, $3, $4, $5, $6, $7, now())`,
-          [id, vendorId, row.name, row.category, stock, price, row.supplier]
-        );
-      }
-
-      if (row.stock != null && Number(row.stock) !== 0) {
-        await client.query(
-          `insert into stock_ledger
-             (vendor_id, product_id, change, reason, source_extraction_id, new_stock_level)
-           values ($1, $2, $3, 'bulk_upload', $4, $5)`,
-          [vendorId, id, stock, extraction.id, newStock]
-        );
-      }
-
-      saved.push({
-        name: row.name,
-        stock: newStock,
+  const validRows = rows
+    .map((row) => {
+      const productId =
+        (row.productId && String(row.productId).trim()) ||
+        productIdFor(vendorId, row.name);
+      const stock = Number.isFinite(Number(row.stock)) ? Number(row.stock) : 0;
+      const price = Number.isFinite(Number(row.price)) ? Number(row.price) : 0;
+      return {
+        productId,
+        name: row.name || productId,
+        category: row.category || null,
+        stock,
         price,
-        supplier: row.supplier,
-      });
-    }
+        supplier: row.supplier || null,
+      };
+    })
+    .filter((r) => r.productId && r.name);
 
-    await client.query(
-      `update raw_extractions
-          set status = 'confirmed', confirmed_at = now()
-        where id = $1`,
-      [extraction.id]
-    );
-
-    await client.query('commit');
-    return { count: saved.length, products: saved };
-  } catch (err) {
-    await client.query('rollback');
-    throw err;
-  } finally {
-    client.release();
+  if (!validRows.length) {
+    throw new Error('No valid products found to save');
   }
+
+  return upsertProducts(vendorId, validRows, extraction.id);
+}
+
+/**
+ * Low-stock digest for WhatsApp / cron / GET /api/inventory/:vendorId/low-stock
+ */
+async function generateLowStockDigest(vendorId) {
+  const pg = getPool();
+  if (!pg) throw new Error('Database not configured');
+
+  const result = await pg.query(
+    `select id, product_name, stock, low_stock_threshold, supplier, price
+       from products
+      where vendor_id = $1 and stock <= low_stock_threshold
+      order by stock asc, product_name asc`,
+    [vendorId]
+  );
+
+  const items = result.rows;
+  if (!items.length) {
+    return {
+      vendorId,
+      count: 0,
+      items: [],
+      message: '✅ All products are above their low-stock threshold.',
+    };
+  }
+
+  const lines = items.map(
+    (p, i) =>
+      `${i + 1}. *${p.product_name}* — stock ${p.stock} (threshold ${p.low_stock_threshold})` +
+      (p.supplier ? ` · ${p.supplier}` : '')
+  );
+
+  const message =
+    `⚠️ *Low stock alert* (${items.length})\n\n` + lines.join('\n');
+
+  return { vendorId, count: items.length, items, message };
 }
 
 module.exports = {
   postInventory,
   collectProductRows,
+  generateLowStockDigest,
+  productIdFor,
 };

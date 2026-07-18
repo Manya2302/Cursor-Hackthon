@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import InventorySetup from '../components/InventorySetup'
 import {
@@ -83,6 +84,10 @@ export default function Dashboard() {
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">{APP_NAME}</span>
         </div>
+        <nav className="dash-nav">
+          <Link to="/dashboard">Dashboard</Link>
+          <Link to="/statements">Statements</Link>
+        </nav>
         <div className="dash-user">
           <div className="dash-avatar" aria-hidden="true">
             {initials(session?.name)}

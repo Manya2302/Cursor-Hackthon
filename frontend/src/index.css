@@ -997,7 +997,89 @@ input,
   }
 }
 
-/* ——— Tablet+ ——— */
+.dash-nav {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.dash-nav a {
+  color: var(--forest);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.dash-nav a:hover {
+  color: var(--moss);
+}
+
+.statement-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.statement-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.statement-form select,
+.statement-form input {
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.statement-form .btn {
+  align-self: end;
+}
+
+.statement-text {
+  white-space: pre-wrap;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  background: #f8fbf7;
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.statement-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 0.95rem;
+}
+
+.statement-table th,
+.statement-table td {
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.statement-table th {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+/* ——— Tablet+ / Responsive ——— */
 
 @media (min-width: 560px) {
   .auth-panel {

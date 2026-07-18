@@ -7,7 +7,13 @@ const SARVAM_STT_URL = 'https://api.sarvam.ai/speech-to-text';
 const SARVAM_MODEL = 'saaras:v3';
 
 function getApiKey() {
-  return (process.env.SARVAM_API_KEY || '').replace(/^["']|["']$/g, '').trim();
+  return (
+    process.env.SARVAM_API_KEY ||
+    process.env.SURVOM_API_KEY || // common typo
+    ''
+  )
+    .replace(/^["']|["']$/g, '')
+    .trim();
 }
 
 /**

@@ -116,7 +116,7 @@ async function getLatestPendingExtraction(vendorId) {
   if (!pg) return null;
 
   const result = await pg.query(
-    `select id, vendor_id, command, raw_input, llm_parsed, status, created_at
+    `select id, vendor_id, command, raw_input, llm_parsed, status, created_at, detected_language
        from raw_extractions
       where vendor_id = $1 and status = 'pending_confirmation'
       order by created_at desc

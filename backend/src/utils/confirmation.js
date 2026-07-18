@@ -20,10 +20,12 @@ function buildConfirmationSummary(parsed) {
   }
 
   if (parsed.intent === 'statement_query') {
-    const type = parsed.statement?.type || 'statement';
-    const period = parsed.statement?.period || 'the requested period';
+    const st = parsed.statement || {};
+    const type = st.statementType || st.type || 'pnl';
+    const period = st.datePhrase || st.period || 'this_month';
     return (
-      `📊 Report: ${type} (${period})\n\nReply *YES* to confirm or *NO* to cancel.`
+      `📊 Report: *${type}* (${period})\n\n` +
+      'Reply *YES* to generate, or *NO* to cancel.'
     );
   }
 
@@ -75,6 +77,13 @@ function formatTransactionBill(parsed) {
     lines.push(`💰 Total *₹${formatMoney(parsed.total_amount)}*`);
   }
 
+  if (parsed.invoice_warning || /Total mismatch/i.test(String(parsed.notes || ''))) {
+    lines.push('⚠️ Total mismatch (OCR total ≠ sum of line prices)');
+  }
+  if (parsed.invoice_confidence) {
+    lines.push(`Confidence: *${parsed.invoice_confidence}*`);
+  }
+
   lines.push('');
   if (missingIdentity) {
     lines.push(
@@ -96,57 +105,61 @@ function formatTransactionBill(parsed) {
 
 function formatInventoryBill(parsed) {
   const party = parsed.party || {};
+  const bulkRows = Array.isArray(parsed.bulk_rows) ? parsed.bulk_rows : [];
   const updates = Array.isArray(parsed.product_updates)
-    ? parsed.product_updates.filter((p) => p?.name)
+    ? parsed.product_updates.filter((p) => p?.name || p?.productId)
     : [];
   const fromItems =
-    updates.length === 0 && Array.isArray(parsed.items)
+    updates.length === 0 &&
+    bulkRows.length === 0 &&
+    Array.isArray(parsed.items)
       ? parsed.items.filter((i) => i?.name)
       : [];
 
   const rows =
-    updates.length > 0
-      ? updates
-      : fromItems.map((i) => ({
-          name: i.name,
-          stock: i.quantity,
-          price: i.line_amount != null ? i.line_amount : i.unit_price,
-          category: i.weight_text || i.unit,
-        }));
+    bulkRows.length > 0
+      ? bulkRows
+      : updates.length > 0
+        ? updates
+        : fromItems.map((i) => ({
+            name: i.name,
+            stock: i.quantity,
+            price: i.line_amount != null ? i.line_amount : i.unit_price,
+            category: i.weight_text || i.unit,
+          }));
 
-  const hasName = Boolean(party.name && String(party.name).trim());
-  const hasPhone = Boolean(party.phone && String(party.phone).trim());
-  const missingIdentity = !hasName || !hasPhone;
+  const meta = parsed.bulk_meta || {};
+  const newCount = meta.newCount != null ? meta.newCount : null;
+  const updateCount = meta.updateCount != null ? meta.updateCount : null;
+  const invalidCount = Array.isArray(meta.invalidRows)
+    ? meta.invalidRows.length
+    : meta.invalidCount || 0;
 
   const lines = [];
   lines.push('📦 *Stock / products*');
 
-  if (hasName) lines.push(`🏭 ${party.name}`);
-  if (hasPhone) lines.push(`📞 ${party.phone}`);
+  if (newCount != null && updateCount != null) {
+    lines.push(
+      `Found *${rows.length}* products. *${newCount}* new, *${updateCount}* updates` +
+        (invalidCount ? `, ${invalidCount} skipped` : '') +
+        '.'
+    );
+  } else if (party.name) {
+    lines.push(`🏭 ${party.name}`);
+  }
 
   rows.slice(0, 8).forEach((p, idx) => {
-    const bits = [`${idx + 1}. ${String(p.name).toUpperCase()}`];
-    if (p.stock != null) bits.push(`qty ${p.stock}`);
+    const label = p.name || p.productId || 'item';
+    const bits = [`${idx + 1}. ${String(label)}`];
+    if (p.productId) bits.push(String(p.productId));
+    if (p.stock != null) bits.push(`stock ${p.stock}`);
     if (p.price != null) bits.push(`₹${formatMoney(p.price)}`);
     lines.push(bits.join(' · '));
   });
   if (rows.length > 8) lines.push(`…+${rows.length - 8} more`);
 
   lines.push('');
-  if (missingIdentity) {
-    lines.push(
-      '⚠️ No customer name / phone in this file.\n' +
-        'Reply *YES* to save without them, or send:\n' +
-        'NAME:\n' +
-        'NUMBER:\n' +
-        'Then reply *YES* to save.\n' +
-        '*NO* to cancel.'
-    );
-  } else if (parsed.identity_verify?.verified) {
-    lines.push('✅ Name / phone added.\nReply *YES* to save, or *NO* to cancel.');
-  } else {
-    lines.push('Reply *YES* to save, or *NO* to cancel.');
-  }
+  lines.push('Reply *YES* to apply, or *NO* to cancel.');
   return lines.join('\n');
 }
 

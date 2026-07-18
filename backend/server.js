@@ -17,6 +17,12 @@ for (const key of [
   'VERIFY_TOKEN',
   'WHATSAPP_VERIFY_TOKEN',
   'GROQ_API_KEY',
+  'GROQ_API_KEY_FALLBACK',
+  'GROQ_API_KEY_2',
+  'GROQ_API_KEYS',
+  'SARVAM_API_KEY',
+  'SURVOM_API_KEY',
+  'STT_PROVIDER',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
   'SUPABASE_API',
@@ -27,13 +33,19 @@ for (const key of [
   }
 }
 
+// Alias typo SURVOM → SARVAM
+if (!process.env.SARVAM_API_KEY && process.env.SURVOM_API_KEY) {
+  process.env.SARVAM_API_KEY = process.env.SURVOM_API_KEY;
+}
+
 const app = require('./src/app');
+const { getApiKeys } = require('./src/services/groqKeys');
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`NIRVHA listening on port ${PORT}`);
   console.log(
-    `WHATSAPP_TOKEN set: ${Boolean(process.env.WHATSAPP_TOKEN)} | GROQ set: ${Boolean(process.env.GROQ_API_KEY)} | VERIFY_TOKEN: ${process.env.VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || '(missing)'}`
+    `WHATSAPP_TOKEN set: ${Boolean(process.env.WHATSAPP_TOKEN)} | GROQ keys: ${getApiKeys().length} | VERIFY_TOKEN: ${process.env.VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || '(missing)'}`
   );
 });

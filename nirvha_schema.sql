@@ -358,3 +358,15 @@ returns void language sql as $$
     ('drawings', p_vendor_id, 'Drawings', 'equity')
   on conflict (id) do nothing;
 $$;
+
+-- ============================================================================
+-- 7. PRODUCT MASTER + PRICE VERIFICATION + PROFIT (additive)
+-- Full DDL: backend/migrations/002_product_master.sql
+--
+-- Core live path:
+--   product_master ← product_aliases / product_price_history
+--   ocr_documents + ocr_items → verification_results → sales_transactions (+ sales_items.profit)
+--   journal_entries.profit / sales_transaction_id for digests
+-- Core live path: product_master → priceVerify → sales_transactions (+ profit)
+-- Unused stub tables removed in migrations/003_drop_unused_stubs.sql
+-- ============================================================================

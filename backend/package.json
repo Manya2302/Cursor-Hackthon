@@ -1,7 +1,7 @@
 {
-  "name": "ledgerbot",
+  "name": "nirvha",
   "version": "0.1.0",
-  "description": "LedgerBot — WhatsApp-native double-entry bookkeeping backend",
+  "description": "NIRVHA — WhatsApp-native double-entry bookkeeping backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

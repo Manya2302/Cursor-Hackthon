@@ -32,7 +32,7 @@ const app = require('./src/app');
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`LedgerBot listening on port ${PORT}`);
+  console.log(`NIRVHA listening on port ${PORT}`);
   console.log(
     `WHATSAPP_TOKEN set: ${Boolean(process.env.WHATSAPP_TOKEN)} | GROQ set: ${Boolean(process.env.GROQ_API_KEY)} | VERIFY_TOKEN: ${process.env.VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || '(missing)'}`
   );

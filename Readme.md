@@ -1,14 +1,14 @@
-# LedgerBot
+# NIRVHA
 
 **An invisible AI accountant that lives inside WhatsApp.**
 
-LedgerBot lets small business owners — kirana stores, small manufacturers, coaching centres, retailers — keep real, tallied, double-entry books just by sending the WhatsApp messages, voice notes, and photos they already send today.
+NIRVHA lets small business owners — kirana stores, small manufacturers, coaching centres, retailers — keep real, tallied, double-entry books just by sending the WhatsApp messages, voice notes, and photos they already send today.
 
 ---
 
 ## Current phase
 
-**Single AI agent (no slash commands):** send plain text, voice, bill photos, or supplier/stock PDFs. LedgerBot classifies intent, shows a confirmation, and on **YES** either posts a **journal entry** (sales/bills) or upserts **products** (supplier/stock lists).
+**Single AI agent (no slash commands):** send plain text, voice, bill photos, or supplier/stock PDFs. NIRVHA classifies intent, shows a confirmation, and on **YES** either posts a **journal entry** (sales/bills) or upserts **products** (supplier/stock lists).
 
 ---
 
@@ -96,7 +96,7 @@ Or run everything with `start.bat` (backend + frontend + ngrok).
 ### A. Create a Meta developer app
 
 1. Go to [https://developers.facebook.com](https://developers.facebook.com) → **My Apps** → **Create App**.
-2. Choose **Business** (or Other → Business), name it e.g. `LedgerBot`.
+2. Choose **Business** (or Other → Business), name it e.g. `NIRVHA`.
 3. In the app dashboard, add the **WhatsApp** product → **API Setup**.
 
 ### B. Temporary test token + phone number ID

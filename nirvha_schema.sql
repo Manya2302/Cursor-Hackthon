@@ -1,5 +1,5 @@
 -- ============================================================================
--- LedgerBot — Complete Database Schema (Supabase / Postgres)
+-- NIRVHA — Complete Database Schema (Supabase / Postgres)
 -- Run this entire file once against a fresh Supabase project (SQL Editor,
 -- or `psql` / `supabase db push`). It creates every table, the core
 -- balance-enforcing trigger, indexes, RLS, and a set of callable functions

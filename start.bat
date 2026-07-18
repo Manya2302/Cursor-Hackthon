@@ -1,10 +1,10 @@
 @echo off
-title LedgerBot - Starting...
+title NIRVHA - Starting...
 color 0A
 cls
 
 echo ============================================
-echo   LedgerBot Backend + Frontend + Ngrok
+echo   NIRVHA Backend + Frontend + Ngrok
 echo ============================================
 echo.
 
@@ -14,14 +14,14 @@ taskkill /IM ngrok.exe /F >nul 2>&1
 echo Done.
 
 :: Step 2: Start Node Express backend in a new window
-echo [2/4] Starting LedgerBot backend on port 3000...
-start "LedgerBot Backend" cmd /k "cd /d d:\Manya\Cursor-hackathon\backend && node server.js"
+echo [2/4] Starting NIRVHA backend on port 3000...
+start "NIRVHA Backend" cmd /k "cd /d d:\Manya\Cursor-hackathon\backend && node server.js"
 timeout /t 3 /nobreak >nul
 echo Done.
 
 :: Step 3: Start frontend (Vite)
 echo [3/4] Starting frontend on port 5173...
-start "LedgerBot Frontend" cmd /k "cd /d d:\Manya\Cursor-hackathon\frontend && npm run dev"
+start "NIRVHA Frontend" cmd /k "cd /d d:\Manya\Cursor-hackathon\frontend && npm run dev"
 timeout /t 2 /nobreak >nul
 echo Done.
 

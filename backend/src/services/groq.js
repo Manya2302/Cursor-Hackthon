@@ -9,10 +9,10 @@ const VISION_MODEL =
   process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
 
 /**
- * Extraction Agent — single LedgerBot brain.
+ * Extraction Agent — single NIRVHA brain.
  * Classifies what the user wants from plain text / OCR / captions (no slash commands).
  */
-const EXTRACTION_SYSTEM_PROMPT = `You are LedgerBot's single AI agent for small Indian businesses (kirana stores, retailers).
+const EXTRACTION_SYSTEM_PROMPT = `You are NIRVHA's single AI agent for small Indian businesses (kirana stores, retailers).
 
 The user may send plain WhatsApp text, a voice transcript, OCR from a photo/PDF, and/or a short caption like "supplier", "stock", "customer bill", or "udhaar".
 
@@ -155,7 +155,7 @@ async function generateAiResponse(userMessage) {
         {
           role: 'system',
           content:
-            'You are LedgerBot, a helpful WhatsApp AI accountant for small Indian businesses. ' +
+            'You are NIRVHA, a helpful WhatsApp AI accountant for small Indian businesses. ' +
             'Keep replies short. Users do NOT need slash commands — they can send text, photos of bills, or supplier/stock sheets and you will understand. ' +
             'If they want to save something to the books, tell them to send the bill/photo or details and reply YES when asked to confirm.',
         },

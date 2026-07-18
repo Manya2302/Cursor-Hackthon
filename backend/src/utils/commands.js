@@ -1,5 +1,5 @@
 /**
- * Legacy slash-commands removed — LedgerBot uses a single intent agent.
+ * Legacy slash-commands removed — NIRVHA uses a single intent agent.
  * Kept as a no-op module so old imports do not crash if referenced.
  */
 module.exports = {

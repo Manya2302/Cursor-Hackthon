@@ -1,5 +1,5 @@
 -- ============================================================================
--- LedgerBot — Phase 1 schema (Supabase / Postgres)
+-- NIRVHA — Phase 1 schema (Supabase / Postgres)
 -- Run once against a fresh Supabase project (SQL Editor, or psql).
 -- Creates tables, journal balance trigger, indexes, and RLS policies.
 -- ============================================================================

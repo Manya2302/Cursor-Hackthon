@@ -38,6 +38,7 @@ STRICT RULES:
 - Phone NUMBER may use Gujarati digits — treat as the same phone once normalized to 0-9.
 - Item lines may look like: ITEM: ખાંડ | WEIGHT: 1 કિલો | AMOUNT: 200 — map to items[].name, weight_text, line_amount.
 - Known Gujarati groceries: ખાંડ=Sugar, ઘી=Ghee, બટર=Butter, ચીઝ=Cheese, દૂધ=Milk (do not swap these).
+- Common measure aliases in bills: KI/KG/KILO=KG, ARDHO=0.5KG, PONO=0.75KG, SAVA=1.25KG, DODH=1.5KG, PAV=250GM, TOLA≈11.66GM, MANN=regional bulk unit.
 - Supplier / stock / price-list / "add products" with item rows → inventory_bulk; party.role supplier when a supplier is named.
 - PDF / CSV / Excel product or price lists with NO customer name → inventory_bulk (do not ask for customer name/phone).
 - Do NOT format a human reply — extraction only.

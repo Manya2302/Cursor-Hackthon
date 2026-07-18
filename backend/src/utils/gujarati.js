@@ -22,6 +22,82 @@ function containsGujarati(text) {
   return /[\u0A80-\u0AFF]/.test(text || '');
 }
 
+/**
+ * Common Indian grocery measures and local Gujarati names used in handwritten bills.
+ * This is the canonical reference used by parseWeightText().
+ */
+const COMMON_MEASURE_REFERENCE = [
+  {
+    label: 'KILO',
+    normalized_quantity: 1,
+    normalized_unit: 'KG',
+    approx_grams: 1000,
+    aliases: ['kilo', 'kg', 'k.g', 'ki', 'કિલો', 'કિલો그램', 'किलो'],
+  },
+  {
+    label: 'ARDHO_KILO',
+    normalized_quantity: 0.5,
+    normalized_unit: 'KG',
+    approx_grams: 500,
+    aliases: ['અડધો કિલો', 'અડધી કિલો', 'ardho kilo', 'half kilo'],
+  },
+  {
+    label: 'PONO_KILO',
+    normalized_quantity: 0.75,
+    normalized_unit: 'KG',
+    approx_grams: 750,
+    aliases: ['પોણો કિલો', 'pono kilo', 'three quarter kilo'],
+  },
+  {
+    label: 'SAVA_KILO',
+    normalized_quantity: 1.25,
+    normalized_unit: 'KG',
+    approx_grams: 1250,
+    aliases: ['સવા કિલો', 'sava kilo', 'one and quarter kilo'],
+  },
+  {
+    label: 'DODH_KILO',
+    normalized_quantity: 1.5,
+    normalized_unit: 'KG',
+    approx_grams: 1500,
+    aliases: ['દોઢ કિલો', 'dodh kilo', 'one and half kilo'],
+  },
+  {
+    label: 'PAV',
+    normalized_quantity: 250,
+    normalized_unit: 'GM',
+    approx_grams: 250,
+    aliases: ['પાવ', 'pav'],
+  },
+  {
+    label: 'TOLA',
+    normalized_quantity: 11.66,
+    normalized_unit: 'GM',
+    approx_grams: 11.66,
+    aliases: ['તોલા', 'tola'],
+  },
+  {
+    label: 'MANN',
+    normalized_quantity: 1,
+    normalized_unit: 'MANN',
+    approx_grams: 20000,
+    aliases: ['મણ', 'mann', 'man'],
+    notes: 'Traditional regional unit, often around 20 kg in Gujarat.',
+  },
+  {
+    label: 'LITER',
+    normalized_quantity: 1,
+    normalized_unit: 'L',
+    aliases: ['liter', 'litre', 'ltr', 'લિટર', 'લીટર'],
+  },
+  {
+    label: 'MILLILITER',
+    normalized_quantity: 1,
+    normalized_unit: 'ML',
+    aliases: ['ml', 'મિલી', 'મિ.લી', 'मिली'],
+  },
+];
+
 /** Common kirana item lexicon for OCR correction (Gujarati → canonical). */
 const GUJARATI_ITEM_LEXICON = [
   { gu: 'ખાંડ', en: 'Sugar', aliases: ['ખાંડ', 'ખાડ', 'ખાંड'] },
@@ -36,19 +112,59 @@ const GUJARATI_ITEM_LEXICON = [
   { gu: 'ચોખા', en: 'Rice', aliases: ['ચોખા'] },
 ];
 
+function normalizeWeightText(weightText) {
+  return normalizeGujaratiDigits(String(weightText || ''))
+    .toLowerCase()
+    .replace(/[.,|/:;()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Parse WEIGHT like "500 ગ્રા" / "1 કિલો" / "500 મિ.લી" into quantity + unit.
  */
 function parseWeightText(weightText) {
   if (!weightText) return { quantity: null, unit: null };
-  const { normalizeGujaratiDigits } = require('./gujarati');
-  const t = normalizeGujaratiDigits(String(weightText)).trim();
-  const num = t.match(/(\d+(?:\.\d+)?)/);
+  const compact = normalizeWeightText(weightText);
+
+  const fixedKiloMap = [
+    { quantity: 0.5, regex: /(?:અડધ[ોી]?\s*કિલો|ardh[oa]?\s*kilo|half\s*kilo)/i },
+    { quantity: 0.75, regex: /(?:પોણ[ોા]?\s*કિલો|pono\s*kilo|three\s*quarter\s*kilo)/i },
+    { quantity: 1.25, regex: /(?:સવા\s*કિલો|sava\s*kilo|one\s*and\s*quarter\s*kilo)/i },
+    { quantity: 1.5, regex: /(?:દોઢ\s*કિલો|dodh\s*kilo|one\s*and\s*half\s*kilo)/i },
+  ];
+  for (const item of fixedKiloMap) {
+    if (item.regex.test(compact)) {
+      return { quantity: item.quantity, unit: 'KG' };
+    }
+  }
+
+  const pav = compact.match(/(?:(\d+(?:\.\d+)?)\s+)?(?:પાવ|pav)\b/i);
+  if (pav) {
+    const count = pav[1] ? Number(pav[1]) : 1;
+    return { quantity: count * 250, unit: 'GM' };
+  }
+
+  const tola = compact.match(/(?:(\d+(?:\.\d+)?)\s+)?(?:તોલા|tola)\b/i);
+  if (tola) {
+    const count = tola[1] ? Number(tola[1]) : 1;
+    return { quantity: Number((count * 11.66).toFixed(2)), unit: 'GM' };
+  }
+
+  const mann = compact.match(/(?:(\d+(?:\.\d+)?)\s+)?(?:મણ|mann|man)\b/i);
+  if (mann) {
+    const count = mann[1] ? Number(mann[1]) : 1;
+    return { quantity: count, unit: 'MANN' };
+  }
+
+  const num = compact.match(/(\d+(?:\.\d+)?)/);
   const quantity = num ? Number(num[1]) : null;
   let unit = null;
-  if (/કિ|किल|kg|k\.?g/i.test(t)) unit = 'KG';
-  else if (/મિ\.?\s*લી|ml|मिली/i.test(t)) unit = 'ML';
-  else if (/ગ્રા|gm|g\b|ग्राम/i.test(t)) unit = 'GM';
+  if (/(?:^|\s)(?:kg|k g|kilo|ki)(?:\s|$)|કિલો|किलो/i.test(compact)) unit = 'KG';
+  else if (/(?:^|\s)(?:ml)(?:\s|$)|મિ લી|મિલી|मिली/i.test(compact)) unit = 'ML';
+  else if (/(?:^|\s)(?:l|ltr|liter|litre)(?:\s|$)|લિટર|લીટર/i.test(compact)) unit = 'L';
+  else if (/(?:^|\s)(?:gm|gram|g)(?:\s|$)|ગ્રા|ग्राम/i.test(compact)) unit = 'GM';
+
   return { quantity, unit };
 }
 
@@ -167,6 +283,7 @@ function enrichParsedBill(parsed, ocrText = '') {
 module.exports = {
   normalizeGujaratiDigits,
   containsGujarati,
+  COMMON_MEASURE_REFERENCE,
   GUJARATI_ITEM_LEXICON,
   parseWeightText,
   enrichParsedBill,

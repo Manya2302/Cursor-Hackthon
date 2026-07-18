@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { API_BASE } from '../config'
 
 const STATEMENT_TYPES = [
   { value: 'pnl', label: 'Profit & Loss' },
@@ -42,7 +43,7 @@ export default function StatementViewer() {
     async function resolveVendor() {
       if (!session?.phone) return
       const look = await fetch(
-        `/api/vendors/lookup?phone=${encodeURIComponent(session.phone)}`
+        `${API_BASE}/api/vendors/lookup?phone=${encodeURIComponent(session.phone)}`
       )
       if (look.ok) {
         const body = await look.json()
@@ -62,7 +63,7 @@ export default function StatementViewer() {
     }
     setLoading(true)
     try {
-      const res = await fetch('/api/statements', {
+      const res = await fetch(`${API_BASE}/api/statements`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

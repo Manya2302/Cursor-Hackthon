@@ -225,40 +225,14 @@ function extractStructuredBill(text) {
     }
   }
 
-  // Fallback: known grocery rows written without ITEM: prefix
-  if (lines.length === 0) {
-    const lex = [
-      'ખાંડ',
-      'ઘી',
-      'બટર',
-      'ચીઝ',
-      'દૂધ',
-      'Sugar',
-      'Ghee',
-      'Butter',
-      'Cheese',
-      'Milk',
-      'Maggi',
-      'Maggie',
-      'Tea',
-      'Oil',
-      'Rice',
-      'Atta',
-      'Flour',
-    ];
-    for (const nameItem of lex) {
-      const re = new RegExp(
-        `${nameItem}\\s*[,|\\-:]?\\s*(\\d+(?:\\.\\d+)?\\s*(?:kg|gm|g|ml|l|pcs|nos)?)?\\s*[,|\\-:]?\\s*(\\d{2,5})(?:\\s*Rs|\\s*₹)?`,
-        'i'
-      );
-      const hit = full.match(re);
-      if (hit) {
-        lines.push(
-          `ITEM: ${nameItem} | WEIGHT: ${hit[1] || ''} | AMOUNT: ${hit[2]}`
-        );
-      }
-    }
-  }
+  // NOTE: previously had a loose lexicon fallback here that scanned the whole
+  // raw blob for known grocery words + nearby digits when no ITEM: lines were
+  // found. It was too unreliable — it grabbed unrelated digits (e.g. from the
+  // phone number) as fake weight/amount and produced a false single-item hit,
+  // which also prevented ocrImageText's real retry (stricter prompt) from
+  // firing since that only triggers when items.length === 0. Removed: better
+  // to return 0 items and let the caller retry with a stricter vision prompt
+  // than to fabricate a plausible-looking but wrong row.
 
   let total =
     full.match(/(?:^|\n)\s*TOTAL\s*:\s*([0-9૦-૯]+(?:\.\d+)?)/i)?.[1] ||
@@ -641,27 +615,32 @@ async function ocrImageText(imageBuffer, mimeType = 'image/jpeg') {
 
 async function runBillVision(dataUrl, strictRetry = false) {
   const prompt = strictRetry
-    ? 'STRICT OCR. Keep image language (en/gu).\n' +
-      'Table columns Item | Quantity | Price OR lines like Ghee-1kg-1-200.\n' +
-      'Output one line per product as: ITEM: Product-pack-count-lineTotal\n' +
-      'Example: ITEM: Ghee-1kg-1-200\nITEM: Sugar-500gm-2-250\nITEM: Milk-1kg-1-52\n' +
-      'Also: LANG / NAME / NUMBER / TOTAL. Never invent.'
-    : 'OCR handwritten kirana bill. Detect LANG en|gu.\n' +
-      'Header: Name + Number.\n' +
-      'Table often: Item | Quantity | Price\n' +
-      '  Ghee - 1kg | 1 | 200\n' +
-      '  Sugar - 500gm | 2 | 250\n' +
-      '  Milk - 1kg | 1 | 52\n' +
-      'Rewrite EACH row as: ITEM: <Product>-<pack>-<count>-<lineTotal>\n' +
-      'Examples:\n' +
-      'ITEM: Ghee-1kg-1-200\n' +
-      'ITEM: Sugar-500gm-2-250\n' +
-      'ITEM: Milk-1kg-1-52\n' +
-      'Also support compact: Ghee1kg-6-3000\n' +
-      'Rules: every row; never invent; never duplicate; Price column = line total.\n' +
+    ? 'STRICT OCR. Keep image language (en/gu). Read the ENTIRE table top to bottom, every row.\n' +
+      'The bill table usually has 3 plain columns: Item | Quantity | Price.\n' +
+      'The Item column is often JUST a product name (e.g. "Ghee", "Sugar", "Milk") with NO weight/pack written — do NOT invent a pack size like "1kg" if none is written.\n' +
+      'Quantity is a plain count (e.g. 1, 2). Price is the rupee amount for that row.\n' +
+      'If the Item text DOES include an explicit pack (e.g. "Ghee - 500gm"), keep it in ItemName exactly as written.\n' +
+      'Output EXACTLY one line per row as: ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <price>\n' +
+      'Example table Ghee|1|200, Sugar|2|250, Milk|1|52 →\n' +
+      'ITEM: Ghee | WEIGHT: 1 | AMOUNT: 200\nITEM: Sugar | WEIGHT: 2 | AMOUNT: 250\nITEM: Milk | WEIGHT: 1 | AMOUNT: 52\n' +
+      'Also: LANG / NAME / NUMBER / TOTAL. Never invent, never skip a row, never duplicate.'
+    : 'OCR handwritten kirana bill. Detect LANG en|gu. Read the ENTIRE table top to bottom, every row.\n' +
+      'Header: Name + Number (usually the first 2 lines above the table).\n' +
+      'The table usually has 3 plain columns: Item | Quantity | Price.\n' +
+      'The Item column is often JUST a product name (e.g. "Ghee", "Sugar", "Milk") with NO weight/pack written — do NOT invent a pack size like "1kg" if none is written in that cell.\n' +
+      'Quantity is a plain count (e.g. 1, 2, 3). Price is the rupee amount for that row (not a per-unit price unless quantity is 1).\n' +
+      'If the Item text DOES include an explicit pack (e.g. "Ghee - 500gm"), keep it in ItemName exactly as written.\n' +
+      'Output EXACTLY one line per row as: ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <price>\n' +
+      'Example — table reads Ghee|1|200, Sugar|2|250, Milk|1|52 →\n' +
+      'ITEM: Ghee | WEIGHT: 1 | AMOUNT: 200\n' +
+      'ITEM: Sugar | WEIGHT: 2 | AMOUNT: 250\n' +
+      'ITEM: Milk | WEIGHT: 1 | AMOUNT: 52\n' +
+      'If a row instead shows an explicit pack, e.g. Sugar - 500gm | 2 | 250, output:\n' +
+      'ITEM: Sugar - 500gm | WEIGHT: 2 | AMOUNT: 250\n' +
+      'Rules: read every row; never skip a row; never invent a row; never duplicate; Price column = amount for that row.\n' +
       'Output ONLY:\n' +
       'LANG: en|gu\nNAME: ...\nNAME_EN: ...\nNUMBER: ...\n' +
-      'ITEM: Product-pack-count-total\nTOTAL: digits';
+      'ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <price>\nTOTAL: digits';
 
   return chatCompletion({
     model: VISION_MODEL,

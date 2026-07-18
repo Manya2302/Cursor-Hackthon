@@ -1,7 +1,7 @@
-const API_BASE = '/api/auth'
+import { API_BASE } from '../config'
 
 async function request(path, body) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${API_BASE}/api/auth${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

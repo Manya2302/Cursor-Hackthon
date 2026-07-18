@@ -551,7 +551,7 @@ async function applyStockAdjust(vendorId, adj) {
       vendorId,
       product.id,
       delta,
-      'whatsapp_manual_adjust',
+      'correction',
       null
     );
     await client.query('commit');

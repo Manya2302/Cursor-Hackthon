@@ -24,7 +24,7 @@ function containsGujarati(text) {
 
 /** Common kirana item lexicon for OCR correction (Gujarati → canonical). */
 const GUJARATI_ITEM_LEXICON = [
-  { gu: 'ખાંડ', en: 'Sugar', aliases: ['ખાંડ', 'ખાડ', 'ખાંड'] },
+  { gu: 'ખાંડ', en: 'Sugar', aliases: ['ખાંડ', 'ખાડ', 'ખાંड', 'khaand', 'khand', 'sugar'] },
   { gu: 'ઘી', en: 'Ghee', aliases: ['ઘી', 'ધી', 'ઘિ'] },
   { gu: 'બટર', en: 'Butter', aliases: ['બટર', 'butter'] },
   { gu: 'ચીઝ', en: 'Cheese', aliases: ['ચીઝ', 'ચાગર', 'ચીજ', 'cheese', 'chzz'] },
@@ -109,12 +109,15 @@ function enrichParsedBill(parsed, ocrText = '') {
         if (next.quantity == null) next.quantity = w.quantity;
         if (!next.unit) next.unit = w.unit;
       }
-      const name = String(next.name || '');
-      const hit = GUJARATI_ITEM_LEXICON.find(
-        (x) =>
-          x.gu === name ||
-          x.aliases.some((a) => a.toLowerCase() === name.toLowerCase())
-      );
+      const name = String(next.name || '').trim();
+      const nameLower = name.toLowerCase();
+      const hit = GUJARATI_ITEM_LEXICON.find((x) => {
+        if (x.gu === name || x.en.toLowerCase() === nameLower) return true;
+        return x.aliases.some((a) => {
+          const al = String(a).toLowerCase();
+          return al === nameLower || nameLower.includes(al);
+        });
+      });
       if (hit) {
         next.name_en = hit.en;
         next.name = hit.gu;

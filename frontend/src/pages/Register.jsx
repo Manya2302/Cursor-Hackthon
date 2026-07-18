@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import AuthShell from '../components/AuthShell'
+import InventorySetup from '../components/InventorySetup'
+import { saveInventory } from '../inventory/storage'
 import { APP_NAME } from '../brand'
 
-const STEPS = ['Details', 'Verify OTP', 'WhatsApp', 'Password']
+const STEPS = ['Details', 'Verify OTP', 'WhatsApp', 'Password', 'Inventory']
 
 export default function Register() {
   const { startRegistration, verifyOtp, setPassword, pendingOtp, clearPendingOtp } =
@@ -77,7 +79,25 @@ export default function Register() {
         throw new Error('Password and confirm password do not match.')
       }
       await setPassword(newUser.id, password)
-      navigate('/login', { state: { phone: newUser.phone } })
+      setStep(4)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function finishToLogin() {
+    navigate('/login', { state: { phone: newUser?.phone || form.phone } })
+  }
+
+  function handleInventorySave(items) {
+    setError('')
+    setLoading(true)
+    try {
+      if (!newUser?.id) throw new Error('Account not found. Please register again.')
+      saveInventory(newUser.id, items)
+      finishToLogin()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -90,14 +110,15 @@ export default function Register() {
   return (
     <AuthShell
       title={`Create your ${APP_NAME} account`}
-      subtitle="Enter your details, verify OTP, get a WhatsApp Hi, then set a login password."
+      subtitle="Verify OTP, set a password, then add inventory so bill photos can match your stock."
+      wide={step === 4}
       footer={
         <>
           Already registered? <Link to="/login">Log in with password</Link>
         </>
       }
     >
-      <ol className="stepper stepper-4" aria-label="Registration steps">
+      <ol className="stepper stepper-5" aria-label="Registration steps">
         {STEPS.map((label, i) => (
           <li
             key={label}
@@ -295,7 +316,7 @@ export default function Register() {
             />
           </label>
           <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? 'Saving…' : 'Save password & continue'}
+            {loading ? 'Saving…' : 'Save password & add inventory'}
           </button>
           <button
             type="button"
@@ -308,6 +329,14 @@ export default function Register() {
             Back
           </button>
         </form>
+      )}
+
+      {step === 4 && newUser && (
+        <InventorySetup
+          saving={loading}
+          onSave={handleInventorySave}
+          onSkip={finishToLogin}
+        />
       )}
     </AuthShell>
   )

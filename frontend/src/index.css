@@ -281,6 +281,14 @@ input,
   grid-template-columns: repeat(4, 1fr);
 }
 
+.stepper.stepper-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.auth-layout-wide .auth-panel-wide {
+  max-width: 640px;
+}
+
 .stepper li {
   display: flex;
   flex-direction: column;
@@ -1092,5 +1100,228 @@ input,
 
   .otp-input {
     letter-spacing: 0.22em;
+  }
+}
+
+/* ——— Inventory setup ——— */
+
+.inventory-setup {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.inventory-setup-head h3 {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  margin: 0 0 0.3rem;
+  letter-spacing: -0.02em;
+}
+
+.inventory-setup-head p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.inv-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  padding: 0.3rem;
+  background: #eef5ef;
+  border-radius: 10px;
+}
+
+.inv-mode-tabs button {
+  border: none;
+  background: transparent;
+  padding: 0.65rem 0.5rem;
+  border-radius: 8px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.inv-mode-tabs button.active {
+  background: var(--panel);
+  color: var(--forest);
+  box-shadow: 0 1px 0 rgba(11, 61, 46, 0.08);
+}
+
+.inv-dropzone {
+  width: 100%;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+  text-align: center;
+  padding: 1.4rem 1rem;
+  border: 1.5px dashed var(--moss);
+  border-radius: 12px;
+  background: #f4faf5;
+  color: var(--forest);
+  cursor: pointer;
+}
+
+.inv-dropzone strong {
+  font-size: 0.98rem;
+}
+
+.inv-dropzone span {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+.inv-dropzone:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.inv-table-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.inv-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 420px;
+  font-size: 0.9rem;
+}
+
+.inv-table th,
+.inv-table td {
+  padding: 0.45rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.inv-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  background: #f4faf5;
+}
+
+.inv-table input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.45rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #fafcfb;
+}
+
+.inv-table input:focus {
+  outline: none;
+  border-color: var(--moss);
+  background: #fff;
+}
+
+.inv-table-readonly td {
+  padding: 0.7rem 0.55rem;
+}
+
+.inv-remove {
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+.bill-preview-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.bill-preview {
+  margin: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.bill-preview img {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+}
+
+.bill-preview figcaption {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.match-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.match-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fafcfb;
+}
+
+.match-list li.hit {
+  border-color: rgba(42, 122, 92, 0.35);
+  background: #f2faf4;
+}
+
+.match-list li.miss {
+  border-color: rgba(180, 35, 24, 0.2);
+  background: #fff8f7;
+}
+
+.match-list p {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.match-badge {
+  flex-shrink: 0;
+  align-self: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--forest);
+}
+
+@media (min-width: 720px) {
+  .bill-preview-grid {
+    grid-template-columns: 0.9fr 1.1fr;
+    align-items: start;
+  }
+}
+
+@media (min-width: 860px) {
+  .auth-layout-wide {
+    grid-template-columns: 0.85fr 1.15fr;
+  }
+
+  .auth-panel-wide {
+    max-width: none;
   }
 }

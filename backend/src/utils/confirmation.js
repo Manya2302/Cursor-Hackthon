@@ -54,7 +54,7 @@ function formatTransactionBill(parsed) {
 
   if (items.length) {
     items.slice(0, 8).forEach((item, idx) => {
-      const name = item.name_en || item.name || 'item';
+      const name = formatItemName(item);
       const weight =
         item.weight_text || formatWeight(item.quantity, item.unit) || '';
       const cost =
@@ -148,6 +148,16 @@ function formatInventoryBill(parsed) {
     lines.push('Reply *YES* to save, or *NO* to cancel.');
   }
   return lines.join('\n');
+}
+
+/** e.g. Sugar (ખાંડ) when lexicon filled both English + Gujarati */
+function formatItemName(item) {
+  const en = item?.name_en ? String(item.name_en).trim() : '';
+  const gu = item?.name ? String(item.name).trim() : '';
+  if (en && gu && en.toLowerCase() !== gu.toLowerCase()) {
+    return `${en} (${gu})`;
+  }
+  return en || gu || 'item';
 }
 
 function formatWeight(quantity, unit) {

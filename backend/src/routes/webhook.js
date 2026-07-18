@@ -7,6 +7,7 @@ const {
   ocrImageText,
   generateAiResponse,
 } = require('../services/groq');
+const { transcribeWithSarvam } = require('../services/sarvam');
 const { extractDocumentText } = require('../services/documents');
 const {
   stageRawExtraction,
@@ -474,6 +475,25 @@ async function handleConfirmationReply(vendor, confirm) {
   }
 }
 
+/**
+ * STT provider switch: sarvam (default) | groq (Whisper fallback).
+ * Groq extractIntent / OCR / chat are unchanged — Sarvam is voice→text only.
+ */
+async function transcribeVoiceNote(vendor, audioBuffer, mimeType) {
+  const provider = String(process.env.STT_PROVIDER || 'sarvam')
+    .trim()
+    .toLowerCase();
+
+  if (provider === 'groq') {
+    console.log('[voice] STT_PROVIDER=groq → Whisper');
+    return transcribeAudio(audioBuffer, mimeType);
+  }
+
+  const language = vendor?.preferred_language || 'gu';
+  console.log(`[voice] STT_PROVIDER=sarvam lang=${language}`);
+  return transcribeWithSarvam(audioBuffer, mimeType, { language });
+}
+
 async function handleVoice(vendor, message) {
   const audioId = message.audio?.id;
   const media = await downloadMedia(audioId);
@@ -483,8 +503,9 @@ async function handleVoice(vendor, message) {
 
   let transcript;
   try {
-    transcript = await transcribeAudio(media.buffer, media.mimeType);
+    transcript = await transcribeVoiceNote(vendor, media.buffer, media.mimeType);
   } catch (err) {
+    console.error('[voice] transcription failed:', err.message);
     return `❌ Could not transcribe: ${err.message}`;
   }
 

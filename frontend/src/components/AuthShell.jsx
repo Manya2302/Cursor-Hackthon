@@ -1,10 +1,10 @@
 import { APP_NAME } from '../brand'
 
-export default function AuthShell({ title, subtitle, footer, children }) {
+export default function AuthShell({ title, subtitle, footer, children, wide = false }) {
   return (
     <div className="auth-page">
       <div className="auth-backdrop" aria-hidden="true" />
-      <div className="auth-layout">
+      <div className={`auth-layout${wide ? ' auth-layout-wide' : ''}`}>
         <aside className="auth-brand-panel">
           <div className="brand">
             <span className="brand-mark" aria-hidden="true" />
@@ -21,7 +21,10 @@ export default function AuthShell({ title, subtitle, footer, children }) {
           </ul>
         </aside>
 
-        <section className="auth-panel" aria-labelledby="auth-panel-title">
+        <section
+          className={`auth-panel${wide ? ' auth-panel-wide' : ''}`}
+          aria-labelledby="auth-panel-title"
+        >
           <header className="auth-panel-head">
             <p className="auth-mobile-brand">
               <span className="brand-mark brand-mark-sm" aria-hidden="true" />

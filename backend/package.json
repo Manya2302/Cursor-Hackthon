@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test:sarvam": "node scripts/smoke-sarvam.js",
+    "test:gujarati": "node scripts/smoke-gujarati.js"
   },
   "engines": {
     "node": ">=20"
@@ -19,6 +21,7 @@
     "morgan": "^1.11.0",
     "pdf-parse": "^2.4.5",
     "pg": "^8.22.0",
+    "sarvamai": "^1.1.7",
     "sharp": "^0.35.3",
     "xlsx": "^0.18.5"
   }

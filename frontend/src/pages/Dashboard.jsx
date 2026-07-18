@@ -1,50 +1,13 @@
+import { useMemo, useRef, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
+import InventorySetup from '../components/InventorySetup'
+import {
+  demoOcrFromBill,
+  getInventory,
+  matchBillLinesToInventory,
+  saveInventory,
+} from '../inventory/storage'
 import { APP_NAME } from '../brand'
-
-const STATS = [
-  { label: 'Cash in hand', value: '₹42,850', hint: 'Today' },
-  { label: 'Receivables', value: '₹18,200', hint: '3 open' },
-  { label: 'Payables', value: '₹9,450', hint: '2 vendors' },
-  { label: 'Stock value', value: '₹1,26,000', hint: 'SKU snapshot' },
-]
-
-const ACTIVITY = [
-  {
-    type: 'Sale',
-    detail: 'Kirana order — 12 items',
-    amount: '+₹2,340',
-    time: '10:42',
-    tone: 'in',
-  },
-  {
-    type: 'Payment',
-    detail: 'Received from Ramesh Traders',
-    amount: '+₹5,000',
-    time: '09:15',
-    tone: 'in',
-  },
-  {
-    type: 'Purchase',
-    detail: 'Stock restock — oil & flour',
-    amount: '−₹3,800',
-    time: 'Yesterday',
-    tone: 'out',
-  },
-  {
-    type: 'Voice',
-    detail: `WhatsApp note parsed by ${APP_NAME} AI`,
-    amount: 'Pending',
-    time: 'Yesterday',
-    tone: 'pending',
-  },
-]
-
-const COMMANDS = [
-  { code: '/ai-order', desc: 'Log a sale from text, voice, or photo' },
-  { code: '/ai-stock', desc: 'Update inventory' },
-  { code: '/ai-payment', desc: 'Record money in or out' },
-  { code: '/ai-report', desc: 'Ask for a quick summary' },
-]
 
 function initials(name = '') {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -53,9 +16,65 @@ function initials(name = '') {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
 }
 
+function formatMoney(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—'
+  return `₹${Number(n).toLocaleString('en-IN')}`
+}
+
 export default function Dashboard() {
   const { session, logout } = useAuth()
   const firstName = session?.name?.split(' ')[0] || 'there'
+  const billRef = useRef(null)
+
+  const [inventory, setInventory] = useState(() => getInventory(session?.userId))
+  const [editingStock, setEditingStock] = useState(false)
+  const [billPreview, setBillPreview] = useState(null)
+  const [matches, setMatches] = useState([])
+  const [billNote, setBillNote] = useState('')
+
+  const stockValue = useMemo(() => {
+    return inventory.reduce((sum, item) => {
+      const q = Number(item.quantity)
+      const p = Number(item.price)
+      if (!Number.isFinite(q) || !Number.isFinite(p)) return sum
+      return sum + q * p
+    }, 0)
+  }, [inventory])
+
+  const stats = [
+    { label: 'Products in stock', value: String(inventory.length), hint: 'Your catalog' },
+    {
+      label: 'Stock value',
+      value: inventory.length ? formatMoney(stockValue) : '—',
+      hint: 'Qty × price',
+    },
+    { label: 'Matched on last bill', value: String(matches.filter((m) => m.matched).length), hint: 'Demo match' },
+    { label: 'Unmatched lines', value: String(matches.filter((m) => !m.matched).length), hint: 'Need review' },
+  ]
+
+  function refreshInventory(next) {
+    setInventory(next)
+    setEditingStock(false)
+  }
+
+  function handleInventorySave(items) {
+    const next = saveInventory(session.userId, items)
+    refreshInventory(next)
+  }
+
+  function handleBillFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+
+    const url = URL.createObjectURL(file)
+    setBillPreview({ url, name: file.name })
+    setBillNote('Demo match (local only) — no backend OCR yet.')
+
+    const lines = demoOcrFromBill(file.name, inventory)
+    const result = matchBillLinesToInventory(lines, inventory)
+    setMatches(result)
+  }
 
   return (
     <div className="dash">
@@ -83,13 +102,13 @@ export default function Dashboard() {
           <p className="dash-eyebrow">Your books</p>
           <h1>Good day, {firstName}</h1>
           <p className="dash-lead">
-            Your invisible AI accountant is ready. Send WhatsApp messages, voice
-            notes, or photos — {APP_NAME} keeps the ledger tallied.
+            Your inventory is saved on this device. Upload a bill photo to see
+            products matched against your catalog.
           </p>
         </section>
 
         <section className="stat-grid" aria-label="Account snapshot">
-          {STATS.map((stat) => (
+          {stats.map((stat) => (
             <article key={stat.label} className="stat">
               <span className="stat-label">{stat.label}</span>
               <strong className="stat-value">{stat.value}</strong>
@@ -98,52 +117,130 @@ export default function Dashboard() {
           ))}
         </section>
 
-        <section className="activity-panel">
+        <section className="activity-panel inventory-panel">
           <div className="panel-head">
-            <h2>Recent activity</h2>
-            <span className="panel-tag">Sample data</span>
+            <h2>Inventory</h2>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setEditingStock((v) => !v)}
+            >
+              {editingStock ? 'Close editor' : inventory.length ? 'Edit stock' : 'Add stock'}
+            </button>
           </div>
-          <ul className="activity-list">
-            {ACTIVITY.map((item) => (
-              <li key={`${item.type}-${item.time}-${item.detail}`}>
-                <div className="activity-body">
-                  <span className={`activity-type tone-${item.tone}`}>{item.type}</span>
-                  <p>{item.detail}</p>
-                </div>
-                <div className="activity-meta">
-                  <span className={`activity-amount tone-${item.tone}`}>
-                    {item.amount}
-                  </span>
-                  <time>{item.time}</time>
-                </div>
-              </li>
-            ))}
-          </ul>
+
+          {editingStock ? (
+            <InventorySetup
+              initialItems={inventory}
+              onSave={handleInventorySave}
+              onSkip={() => setEditingStock(false)}
+              title="Update inventory"
+              subtitle="Upload Excel / PDF / CSV or type products. Stored locally for bill matching."
+            />
+          ) : inventory.length === 0 ? (
+            <p className="form-note">
+              No products yet. Add inventory so bill uploads can match your stock.
+            </p>
+          ) : (
+            <div className="inv-table-wrap">
+              <table className="inv-table inv-table-readonly">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Qty</th>
+                    <th>Unit</th>
+                    <th>Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventory.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.name}</td>
+                      <td>{item.quantity ?? '—'}</td>
+                      <td>{item.unit}</td>
+                      <td>{formatMoney(item.price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
-        <section className="quick-actions">
-          <h2>WhatsApp shortcuts</h2>
-          <p>Use these commands in chat once your number is linked.</p>
-          <ul className="command-list">
-            {COMMANDS.map((cmd) => (
-              <li key={cmd.code}>
-                <code>{cmd.code}</code>
-                <span>{cmd.desc}</span>
-              </li>
-            ))}
-          </ul>
+        <section className="activity-panel bill-match-panel">
+          <div className="panel-head">
+            <h2>Match bill to inventory</h2>
+            <span className="panel-tag">Frontend demo</span>
+          </div>
+          <p className="form-note">
+            Upload a bill image. We simulate reading it and match lines to your
+            saved products (local only — not connected to the server).
+          </p>
+
+          <input
+            ref={billRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={handleBillFile}
+          />
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => billRef.current?.click()}
+            disabled={!inventory.length}
+          >
+            Upload bill photo
+          </button>
+          {!inventory.length && (
+            <p className="form-note">Add inventory first to enable matching.</p>
+          )}
+
+          {billPreview && (
+            <div className="bill-preview-grid">
+              <figure className="bill-preview">
+                <img src={billPreview.url} alt="Uploaded bill" />
+                <figcaption>{billPreview.name}</figcaption>
+              </figure>
+              <div className="bill-matches">
+                {billNote && <p className="form-note">{billNote}</p>}
+                <ul className="match-list">
+                  {matches.map((m, i) => (
+                    <li key={`${m.billName}-${i}`} className={m.matched ? 'hit' : 'miss'}>
+                      <div>
+                        <strong>{m.billName}</strong>
+                        {m.matched ? (
+                          <p>
+                            Matched → {m.product.name}
+                            {m.product.price != null ? ` · ${formatMoney(m.product.price)}` : ''}
+                            {m.product.quantity != null
+                              ? ` · stock ${m.product.quantity} ${m.product.unit}`
+                              : ''}
+                          </p>
+                        ) : (
+                          <p>No match in your inventory</p>
+                        )}
+                      </div>
+                      <span className="match-badge">
+                        {m.matched ? `${Math.round(m.confidence * 100)}%` : '—'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </section>
       </main>
 
       <nav className="dash-mobile-bar" aria-label="Quick actions">
-        <a
+        <button
+          type="button"
           className="btn btn-primary dash-wa-cta"
-          href="https://wa.me/"
-          target="_blank"
-          rel="noreferrer"
+          onClick={() => setEditingStock(true)}
         >
-          Open WhatsApp
-        </a>
+          Edit inventory
+        </button>
         <button type="button" className="btn btn-outline btn-sm" onClick={logout}>
           Log out
         </button>

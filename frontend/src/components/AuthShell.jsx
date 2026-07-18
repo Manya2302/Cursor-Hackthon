@@ -13,7 +13,7 @@ export default function AuthShell({ title, subtitle, footer, children }) {
             kiranas, workshops, and small shops.
           </p>
           <ul className="brand-points">
-            <li>Message in. Ledger out.</li>
+            <li>Message in. Books out.</li>
             <li>Voice, photo, or text — all counted.</li>
             <li>Double-entry without the spreadsheet.</li>
           </ul>

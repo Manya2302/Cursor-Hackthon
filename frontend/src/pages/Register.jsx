@@ -102,8 +102,8 @@ export default function Register() {
 
   return (
     <AuthShell
-      title="Create your account"
-      subtitle="Register, verify OTP, save your passcode, then set a login password."
+      title="Create your NIRVHA account"
+      subtitle="Register, verify OTP, save your passcode, then set a password to log in."
       footer={
         <>
           Already registered? <Link to="/login">Log in with password</Link>

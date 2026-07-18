@@ -25,14 +25,21 @@ function toWhatsAppAddress(phone) {
 }
 
 /**
- * Send "Hi {name}" after successful OTP.
+ * Send "Hi {vendorName}" after successful OTP.
+ * `phone` MUST be the number entered during registration for that account.
  * Prefers free-form text; falls back to the configured welcome template.
  */
 async function sendHiMessage(phone, name) {
   const token = getToken();
   const phoneNumberId = getPhoneNumberId();
+  // Destination = registration phone for this account only (no hardcoded recipient).
   const to = toWhatsAppAddress(phone);
-  // Use the full vendor name entered at registration (not a shortened first name).
+  if (!to || to.length < 10) {
+    const err = new Error('A valid registration phone number is required to send WhatsApp.');
+    err.code = 'INVALID_PHONE';
+    throw err;
+  }
+  // Full vendor name entered at registration.
   const vendorName = String(name || '').trim() || 'there';
 
   if (!token || !phoneNumberId) {

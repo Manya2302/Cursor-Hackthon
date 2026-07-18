@@ -115,23 +115,30 @@ async function verifyOtp({ phone, email, otp }) {
     });
   }
 
+  // Always message the phone number entered at registration (never a fixed number).
   let whatsapp = { ok: false };
   try {
     const sent = await sendHiMessage(user.phone, user.name);
     await store.markWhatsappGreeted(user.id);
-    whatsapp = { ok: true, mode: sent.mode };
+    whatsapp = {
+      ok: true,
+      mode: sent.mode,
+      to: user.phone,
+      text: sent.text || `Hi ${user.name}`,
+    };
   } catch (err) {
     console.error('[auth] WhatsApp greeting failed:', err.message);
     whatsapp = {
       ok: false,
       error: err.message,
       code: err.code || 'WHATSAPP_SEND_FAILED',
+      to: user.phone,
     };
   }
 
   return {
     ok: true,
-    message: `Welcome, ${user.name.split(' ')[0]}!`,
+    message: `Welcome, ${user.name}!`,
     user: publicUser(user),
     whatsapp,
   };

@@ -6,7 +6,7 @@ export default function AuthShell({ title, subtitle, footer, children }) {
         <aside className="auth-brand-panel">
           <div className="brand">
             <span className="brand-mark" aria-hidden="true" />
-            <h1 className="brand-name">LedgerBot</h1>
+            <h1 className="brand-name">NIRVHA</h1>
           </div>
           <p className="brand-tagline">
             An invisible AI accountant that lives inside WhatsApp — books for
@@ -23,7 +23,7 @@ export default function AuthShell({ title, subtitle, footer, children }) {
           <header className="auth-panel-head">
             <p className="auth-mobile-brand">
               <span className="brand-mark brand-mark-sm" aria-hidden="true" />
-              <span>LedgerBot</span>
+              <span>NIRVHA</span>
             </p>
             <h2 id="auth-panel-title">{title}</h2>
             <p>{subtitle}</p>

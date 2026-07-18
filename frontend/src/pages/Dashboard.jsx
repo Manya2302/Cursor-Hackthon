@@ -31,7 +31,7 @@ const ACTIVITY = [
   },
   {
     type: 'Voice',
-    detail: 'WhatsApp note parsed by LedgerBot AI',
+    detail: 'WhatsApp note parsed by NIRVHA AI',
     amount: 'Pending',
     time: 'Yesterday',
     tone: 'pending',
@@ -61,7 +61,7 @@ export default function Dashboard() {
       <header className="dash-header">
         <div className="brand brand-inline">
           <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-name">LedgerBot</span>
+          <span className="brand-name">NIRVHA</span>
         </div>
         <div className="dash-user">
           <div className="dash-avatar" aria-hidden="true">
@@ -83,7 +83,7 @@ export default function Dashboard() {
           <h1>Good day, {firstName}</h1>
           <p className="dash-lead">
             Your invisible AI accountant is ready. Send WhatsApp messages, voice
-            notes, or photos — LedgerBot keeps the ledger tallied.
+            notes, or photos — NIRVHA keeps the ledger tallied.
           </p>
         </section>
 

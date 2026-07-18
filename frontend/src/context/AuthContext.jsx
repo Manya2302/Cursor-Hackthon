@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 
-const STORAGE_USERS = 'ledgerbot_users'
-const STORAGE_SESSION = 'ledgerbot_session'
+const STORAGE_USERS = 'nirvha_users'
+const STORAGE_SESSION = 'nirvha_session'
 
 const AuthContext = createContext(null)
 

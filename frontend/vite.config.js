@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     open: true,
     proxy: {
-      // Forward API calls to LedgerBot Express backend
+      // Forward API calls to NIRVHA Express backend
       '/webhook': 'http://localhost:3000',
       '/api': 'http://localhost:3000',
     },

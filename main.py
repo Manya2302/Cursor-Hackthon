@@ -171,7 +171,7 @@ def extract_document_content(document_id: str, filename: str, mime_type: str) ->
                                     {"type": "text", "text": "Extract ALL text from this document page exactly as it appears, preserving layout, numbers, and structure. Output only the extracted text."}
                                 ]
                             }],
-                            model="meta-llama/llama-4-scout-17b-16e-instruct",
+                            model="qwen/qwen3.6-27b",
                         )
                         extracted_text = ocr_result.choices[0].message.content.strip()
         except Exception as e:
@@ -307,7 +307,7 @@ def gujarati_ocr_pipeline(image_id: str, caption: str = "") -> str:
                     }
                 ]
             }],
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="qwen/qwen3.6-27b",
         )
         gujarati_text = ocr_result.choices[0].message.content.strip()
         print(f"OCR result: {gujarati_text}")
@@ -390,7 +390,7 @@ def analyze_image_general(image_id: str, caption: str = "") -> str:
                     {"type": "text", "text": prompt}
                 ]
             }],
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="qwen/qwen3.6-27b",
         )
         return "🖼️ " + result.choices[0].message.content
     except Exception as e:

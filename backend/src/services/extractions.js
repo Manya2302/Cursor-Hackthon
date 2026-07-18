@@ -22,7 +22,15 @@ function hasServiceRole() {
 
 /**
  * Stage a parsed WhatsApp message in raw_extractions (pending_confirmation).
+ * DB check only allows: text | voice | image | csv — map pdf/excel/document → csv.
  */
+function normalizeInputType(inputType) {
+  const t = String(inputType || 'text').toLowerCase();
+  if (['text', 'voice', 'image', 'csv'].includes(t)) return t;
+  if (['excel', 'xlsx', 'xls', 'pdf', 'document'].includes(t)) return 'csv';
+  return 'text';
+}
+
 async function stageRawExtraction({
   vendorId,
   inputType,
@@ -35,7 +43,7 @@ async function stageRawExtraction({
   const row = {
     vendor_id: vendorId,
     channel: 'whatsapp',
-    input_type: inputType,
+    input_type: normalizeInputType(inputType),
     raw_input: rawInput,
     media_url: mediaUrl,
     command,
@@ -132,8 +140,38 @@ async function rejectPendingExtraction(extractionId) {
   return result.rows[0] || null;
 }
 
+async function markExtractionConfirmed(extractionId) {
+  const pg = getPool();
+  if (!pg) return null;
+
+  const result = await pg.query(
+    `update raw_extractions
+        set status = 'confirmed', confirmed_at = now()
+      where id = $1 and status = 'pending_confirmation'
+      returning id, status, confirmed_at`,
+    [extractionId]
+  );
+  return result.rows[0] || null;
+}
+
+async function updatePendingParsed(extractionId, llmParsed) {
+  const pg = getPool();
+  if (!pg) return null;
+
+  const result = await pg.query(
+    `update raw_extractions
+        set llm_parsed = $2::jsonb
+      where id = $1 and status = 'pending_confirmation'
+      returning id, vendor_id, command, raw_input, llm_parsed, status, created_at`,
+    [extractionId, JSON.stringify(llmParsed)]
+  );
+  return result.rows[0] || null;
+}
+
 module.exports = {
   stageRawExtraction,
   getLatestPendingExtraction,
   rejectPendingExtraction,
+  markExtractionConfirmed,
+  updatePendingParsed,
 };

@@ -8,7 +8,7 @@ LedgerBot lets small business owners — kirana stores, small manufacturers, coa
 
 ## Current phase
 
-**Phase 3 — Groq extraction:** command-triggered WhatsApp input (`/ai-order`, `/ai-stock`, `/ai-payment`, `/ai-report`, `/ai-stock-bulk`) is transcribed/OCR'd when needed, parsed into structured JSON via Groq, staged in `raw_extractions` as `pending_confirmation`, and echoed back for YES/NO. No journal posting yet (Phase 4).
+**Single AI agent (no slash commands):** send plain text, voice, bill photos, or supplier/stock PDFs. LedgerBot classifies intent, shows a confirmation, and on **YES** either posts a **journal entry** (sales/bills) or upserts **products** (supplier/stock lists).
 
 ---
 

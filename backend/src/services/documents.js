@@ -1,10 +1,9 @@
 const { downloadMedia } = require('./whatsapp');
-const { summarizeDocument, ocrImageText } = require('./groq');
+const { summarizeDocument } = require('./groq');
 
 /**
  * Extract text from WhatsApp documents (PDF / Excel / CSV).
- * Mirrors main.py extract_document_content for testing + /ai-stock-bulk.
- * Returns { text, fileTypeLabel, errorMessage }.
+ * Returns { text, fileTypeLabel, errorMessage, inputType }.
  */
 async function extractDocumentText(documentId, filename, mimeType) {
   const media = await downloadMedia(documentId);
@@ -12,6 +11,7 @@ async function extractDocumentText(documentId, filename, mimeType) {
     return {
       text: null,
       fileTypeLabel: null,
+      inputType: 'document',
       errorMessage: `❌ Could not download *${filename}*. Please try again.`,
       buffer: null,
     };
@@ -21,10 +21,12 @@ async function extractDocumentText(documentId, filename, mimeType) {
   const fileBytes = media.buffer;
   let extractedText = '';
   let fileTypeLabel = '';
+  let inputType = 'document';
 
   try {
     if (fnameLower.endsWith('.csv') || (mimeType || '').includes('csv')) {
       fileTypeLabel = 'CSV';
+      inputType = 'csv';
       let textContent = null;
       for (const encoding of ['utf8', 'latin1']) {
         try {
@@ -38,6 +40,7 @@ async function extractDocumentText(documentId, filename, mimeType) {
         return {
           text: null,
           fileTypeLabel,
+          inputType,
           errorMessage: `❌ Could not decode *${filename}*.`,
           buffer: fileBytes,
         };
@@ -49,27 +52,52 @@ async function extractDocumentText(documentId, filename, mimeType) {
       extractedText = rows.join('\n');
     } else if (fnameLower.endsWith('.pdf') || (mimeType || '').includes('pdf')) {
       fileTypeLabel = 'PDF';
+      inputType = 'pdf';
       try {
-        const pdfParse = require('pdf-parse');
-        const parsed = await pdfParse(fileBytes);
-        extractedText = (parsed.text || '').trim();
+        const { PDFParse } = require('pdf-parse');
+        const parser = new PDFParse({ data: fileBytes });
+        const result = await parser.getText();
+        extractedText = (result?.text || '').trim();
+        if (typeof parser.destroy === 'function') await parser.destroy();
       } catch (err) {
         console.error('[documents] PDF parse error:', err.message);
         extractedText = '';
       }
 
-      // Scanned PDF fallback: vision OCR on raw bytes as image-like prompt via base64 note
-      if (!extractedText) {
-        console.log('[documents] Scanned/empty PDF — attempting vision OCR...');
+      // Optional: table extraction if plain text is thin
+      if (!extractedText || extractedText.length < 40) {
         try {
-          extractedText = await ocrImageText(fileBytes, 'application/pdf');
-          if (/no text found/i.test(extractedText)) extractedText = '';
+          const { PDFParse } = require('pdf-parse');
+          const parser = new PDFParse({ data: fileBytes });
+          if (typeof parser.getTable === 'function') {
+            const tables = await parser.getTable();
+            const bits = [];
+            const pages = tables?.pages || tables?.tables || [];
+            if (Array.isArray(pages)) {
+              for (const page of pages) {
+                const pageTables = page.tables || (page.rows ? [page] : []);
+                for (const table of pageTables) {
+                  const rows = table.rows || table;
+                  if (!Array.isArray(rows)) continue;
+                  for (const row of rows) {
+                    if (Array.isArray(row)) bits.push(row.join(' | '));
+                    else if (typeof row === 'string') bits.push(row);
+                  }
+                }
+              }
+            }
+            if (bits.length) {
+              extractedText = [extractedText, bits.join('\n')].filter(Boolean).join('\n\n');
+            }
+          }
+          if (typeof parser.destroy === 'function') await parser.destroy();
         } catch (err) {
-          console.error('[documents] PDF OCR error:', err.message);
+          console.error('[documents] PDF table extract error:', err.message);
         }
       }
     } else if (fnameLower.endsWith('.xlsx') || fnameLower.endsWith('.xls')) {
       fileTypeLabel = 'Excel';
+      inputType = 'excel';
       try {
         const XLSX = require('xlsx');
         const workbook = XLSX.read(fileBytes, { type: 'buffer' });
@@ -87,6 +115,7 @@ async function extractDocumentText(documentId, filename, mimeType) {
         return {
           text: null,
           fileTypeLabel,
+          inputType,
           errorMessage: `❌ Could not read *${filename}*: ${err.message}`,
           buffer: fileBytes,
         };
@@ -95,6 +124,7 @@ async function extractDocumentText(documentId, filename, mimeType) {
       return {
         text: null,
         fileTypeLabel: null,
+        inputType: 'document',
         errorMessage:
           `⚠️ *${filename}* — file type not supported yet.\n` +
           'Supported: PDF, Excel (.xlsx/.xls), CSV',
@@ -105,6 +135,7 @@ async function extractDocumentText(documentId, filename, mimeType) {
     return {
       text: null,
       fileTypeLabel,
+      inputType,
       errorMessage: `❌ Could not read *${filename}*: ${err.message}`,
       buffer: fileBytes,
     };
@@ -114,18 +145,22 @@ async function extractDocumentText(documentId, filename, mimeType) {
     return {
       text: null,
       fileTypeLabel,
-      errorMessage: `⚠️ *${filename}* appears to be empty or contains no readable text.`,
+      inputType,
+      errorMessage:
+        `⚠️ *${filename}* appears to be empty or contains no readable text.\n` +
+        'For scanned PDFs, send a clear *photo* of the page instead.',
       buffer: fileBytes,
     };
   }
 
   console.log(
-    `[documents] Extracted ${extractedText.length} chars from ${filename}`
+    `[documents] Extracted ${extractedText.length} chars from ${filename} (${fileTypeLabel})`
   );
 
   return {
     text: extractedText,
     fileTypeLabel,
+    inputType,
     errorMessage: null,
     buffer: fileBytes,
   };

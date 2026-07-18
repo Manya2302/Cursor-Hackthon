@@ -27,25 +27,32 @@ async function ensureDefaultAccounts(client, vendorId) {
   );
 }
 
-async function ensurePartyAndDebtor(client, vendorId, partyName) {
-  if (!partyName) return null;
+async function ensurePartyAndDebtor(client, vendorId, partyName, partyPhone = null) {
+  const name =
+    partyName && String(partyName).trim() ? String(partyName).trim() : 'Unknown';
 
   const existing = await client.query(
     `select id, name from parties
       where vendor_id = $1 and lower(name) = lower($2)
       limit 1`,
-    [vendorId, partyName]
+    [vendorId, name]
   );
 
   let partyId;
   if (existing.rows[0]) {
     partyId = existing.rows[0].id;
+    if (partyPhone) {
+      await client.query(
+        `update parties set phone = coalesce(phone, $2) where id = $1`,
+        [partyId, partyPhone]
+      );
+    }
   } else {
     const inserted = await client.query(
-      `insert into parties (vendor_id, name, party_type)
-       values ($1, $2, 'customer')
+      `insert into parties (vendor_id, name, phone, party_type)
+       values ($1, $2, $3, 'customer')
        returning id`,
-      [vendorId, partyName]
+      [vendorId, name, partyPhone]
     );
     partyId = inserted.rows[0].id;
   }
@@ -55,10 +62,10 @@ async function ensurePartyAndDebtor(client, vendorId, partyName) {
     `insert into accounts (id, vendor_id, name, account_type, is_party, party_id)
      values ($1, $2, $3, 'asset', true, $4)
      on conflict (id) do nothing`,
-    [accountId, vendorId, `${partyName} (Receivable)`, partyId]
+    [accountId, vendorId, `${name} (Receivable)`, partyId]
   );
 
-  return { partyId, accountId, name: partyName };
+  return { partyId, accountId, name };
 }
 
 /**
@@ -82,6 +89,7 @@ async function postTransaction(vendorId, extraction) {
     const payments = Array.isArray(parsed.payments) ? parsed.payments : [];
     const items = Array.isArray(parsed.items) ? parsed.items : [];
     const partyName = parsed.party?.name || null;
+    const partyPhone = parsed.party?.phone || null;
 
     const lines = [];
     let cashTotal = 0;
@@ -104,28 +112,60 @@ async function postTransaction(vendorId, extraction) {
       if (Number.isFinite(t) && t > 0) cashTotal = t;
     }
 
-    const salesTotal = cashTotal + udhaarTotal;
-    if (salesTotal <= 0) {
-      throw new Error('No payment amounts found to post');
+    // Fallback: sum line amounts if total missing (user confirmed incomplete bill)
+    if (cashTotal === 0 && udhaarTotal === 0) {
+      const lineSum = items.reduce((s, i) => {
+        const v = Number(i.line_amount);
+        return s + (Number.isFinite(v) ? v : 0);
+      }, 0);
+      if (lineSum > 0) cashTotal = lineSum;
     }
 
+    const salesTotal = cashTotal + udhaarTotal;
+
     let debtor = null;
-    if (udhaarTotal > 0 || partyName) {
+    // Always attach a party row (Unknown if name missing) when we have any party hint or items
+    if (partyName || partyPhone || items.length || salesTotal > 0) {
       debtor = await ensurePartyAndDebtor(
         client,
         vendorId,
-        payments.find((p) => p.party_name)?.party_name || partyName
+        partyName,
+        partyPhone
       );
     }
 
-    if (cashTotal > 0) {
-      lines.push({ account_id: 'cash', debit: cashTotal, credit: 0 });
+    const txnType = parsed.transaction_type || 'sale';
+    const isPurchase = txnType === 'purchase';
+
+    if (salesTotal > 0) {
+      if (isPurchase) {
+        lines.push({ account_id: 'purchases', debit: salesTotal, credit: 0 });
+        if (cashTotal > 0) {
+          lines.push({ account_id: 'cash', debit: 0, credit: cashTotal });
+        }
+        if (udhaarTotal > 0) {
+          if (!debtor) throw new Error('Supplier credit needs a party name');
+          lines.push({
+            account_id: debtor.accountId,
+            debit: 0,
+            credit: udhaarTotal,
+          });
+        }
+      } else {
+        if (cashTotal > 0) {
+          lines.push({ account_id: 'cash', debit: cashTotal, credit: 0 });
+        }
+        if (udhaarTotal > 0) {
+          if (!debtor) throw new Error('Udhaar amount needs a party name');
+          lines.push({
+            account_id: debtor.accountId,
+            debit: udhaarTotal,
+            credit: 0,
+          });
+        }
+        lines.push({ account_id: 'sales', debit: 0, credit: salesTotal });
+      }
     }
-    if (udhaarTotal > 0) {
-      if (!debtor) throw new Error('Udhaar amount needs a party name');
-      lines.push({ account_id: debtor.accountId, debit: udhaarTotal, credit: 0 });
-    }
-    lines.push({ account_id: 'sales', debit: 0, credit: salesTotal });
 
     const itemLabel = items
       .filter((i) => i?.name)
@@ -137,8 +177,8 @@ async function postTransaction(vendorId, extraction) {
       .join(', ');
 
     const narration =
-      extraction.raw_input ||
-      `Sale${itemLabel ? `: ${itemLabel}` : ''} (confirmed)`;
+      (extraction.raw_input && String(extraction.raw_input).slice(0, 500)) ||
+      `${isPurchase ? 'Purchase' : 'Sale'}${itemLabel ? `: ${itemLabel}` : ''} (confirmed)`;
 
     const entry = await client.query(
       `insert into journal_entries

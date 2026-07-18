@@ -1,4 +1,5 @@
 const GRAPH_API_BASE = 'https://graph.facebook.com/v17.0';
+const WHATSAPP_TEXT_LIMIT = 4000; // Meta hard limit is 4096; leave headroom
 
 function getToken() {
   return (process.env.WHATSAPP_TOKEN || '').replace(/^["']|["']$/g, '').trim();
@@ -12,8 +13,66 @@ function getPhoneNumberId(overrideId) {
 }
 
 /**
- * Send a plain text WhatsApp message.
- * Matches Python send_whatsapp_message(phone_number_id, to_number, text).
+ * Split long replies so each WhatsApp text.body stays under 4096 chars.
+ */
+function chunkWhatsAppText(text, maxLen = WHATSAPP_TEXT_LIMIT) {
+  const raw = String(text || '');
+  if (raw.length <= maxLen) return [raw];
+
+  const chunks = [];
+  let remaining = raw;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+    let cut = remaining.lastIndexOf('\n', maxLen);
+    if (cut < Math.floor(maxLen * 0.5)) {
+      cut = remaining.lastIndexOf(' ', maxLen);
+    }
+    if (cut < Math.floor(maxLen * 0.5)) cut = maxLen;
+    chunks.push(remaining.slice(0, cut).trimEnd());
+    remaining = remaining.slice(cut).replace(/^\s+/, '');
+  }
+  return chunks.filter((c) => c.length > 0);
+}
+
+async function sendOneTextMessage(to, text, phoneNumberId, token, id) {
+  const url = `${GRAPH_API_BASE}/${id}/messages`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'text',
+      text: { body: text },
+    }),
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error('[whatsapp] ❌ Failed to send message:', res.status, body);
+    if (body?.error?.code === 190) {
+      console.error(
+        '[whatsapp] → Access token expired/invalid. Open Meta Developer → WhatsApp → API Setup, copy a NEW Temporary access token into backend/.env as WHATSAPP_TOKEN, then restart.'
+      );
+    }
+    if (body?.error) {
+      console.error('[whatsapp] Details:', JSON.stringify(body.error));
+    }
+    return null;
+  }
+
+  console.log(`[whatsapp] ✅ Message sent to ${to} (${text.length} chars)`);
+  return body;
+}
+
+/**
+ * Send a plain text WhatsApp message (auto-chunks if over 4096 chars).
  */
 async function sendTextMessage(to, text, phoneNumberId) {
   const token = getToken();
@@ -26,40 +85,23 @@ async function sendTextMessage(to, text, phoneNumberId) {
     return null;
   }
 
-  const url = `${GRAPH_API_BASE}/${id}/messages`;
-  const data = {
-    messaging_product: 'whatsapp',
-    to,
-    type: 'text',
-    text: { body: text },
-  };
+  const chunks = chunkWhatsAppText(text);
+  let last = null;
 
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    });
-
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.error('[whatsapp] ❌ Failed to send message:', res.status, body);
-      if (body?.error?.code === 190) {
-        console.error(
-          '[whatsapp] → Access token expired/invalid. Open Meta Developer → WhatsApp → API Setup, copy a NEW Temporary access token into backend/.env as WHATSAPP_TOKEN, then restart.'
-        );
+    for (let i = 0; i < chunks.length; i++) {
+      const part =
+        chunks.length > 1
+          ? `(${i + 1}/${chunks.length})\n${chunks[i]}`
+          : chunks[i];
+      // Re-chunk if the prefix pushed us over the limit
+      const safeParts = chunkWhatsAppText(part);
+      for (const safe of safeParts) {
+        last = await sendOneTextMessage(to, safe, phoneNumberId, token, id);
+        if (!last) return null;
       }
-      if (body?.error) {
-        console.error('[whatsapp] Details:', JSON.stringify(body.error));
-      }
-      return null;
     }
-
-    console.log(`[whatsapp] ✅ Message sent to ${to}`);
-    return body;
+    return last;
   } catch (err) {
     console.error('[whatsapp] ❌ Failed to send message:', err.message);
     return null;

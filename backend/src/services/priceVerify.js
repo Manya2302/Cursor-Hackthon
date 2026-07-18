@@ -337,7 +337,7 @@ function formatVerificationReport(report, party = {}) {
           `   Bill: ${row.quantity || '?'} × ₹${row.ocr_unit_price} = ₹${row.ocr_line_amount ?? '—'}`
         );
       }
-      lines.push('   → Reply *ADD PRODUCTS* to add it (name → qty → price for one)');
+      lines.push('   → Reply *YES* to auto-add & save, or *ADD PRODUCTS* for step-by-step');
       continue;
     }
 
@@ -369,12 +369,12 @@ function formatVerificationReport(report, party = {}) {
 
   lines.push('');
   lines.push('Reply:');
-  lines.push('• *YES* — accept & save to books');
+  lines.push('• *YES* — accept & save to books (auto-adds unknown products)');
   if (report.mismatch_count > 0) {
     lines.push('• *UPDATE PRICE* — update master to bill unit prices, then save');
   }
   if (report.unknown_count > 0) {
-    lines.push('• *ADD PRODUCTS* — add unknowns (asks name → stock qty → price for one)');
+    lines.push('• *ADD PRODUCTS* — add unknowns step-by-step (name → qty → price)');
   }
   lines.push('• *NO* — cancel');
 

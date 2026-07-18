@@ -10,6 +10,7 @@ const {
   parseQtyUnit,
   qtyInMasterUnit,
   roundMoney,
+  normalizeUnit,
 } = require('../utils/units');
 const {
   ensureDefaultAccounts,
@@ -98,12 +99,28 @@ async function postVerifiedSale(vendorId, extraction, report, opts = {}) {
       ).rows[0];
       if (!prod) continue;
 
-      const { quantity, unit } = parseQtyUnit(
+      const qtyParsed = parseQtyUnit(
         line.quantity,
         line.unit,
-        line.weight_text
+        line.weight_text || line.pack_text
       );
-      const qtyM = qtyInMasterUnit(quantity, unit || prod.unit, prod.unit) || 0;
+      let quantity = qtyParsed.quantity;
+      let unit = qtyParsed.unit;
+      // Bill rows often use a plain count with unit PCS even when master is KG/L.
+      // Treat that count as master-unit quantity so stock actually moves.
+      if (
+        quantity != null &&
+        (!unit || unit === 'PCS') &&
+        prod.unit &&
+        prod.unit !== 'PCS' &&
+        !line.pack_text &&
+        !/\d+\s*(kg|gm|g|ml|l)\b/i.test(String(line.weight_text || ''))
+      ) {
+        unit = prod.unit;
+      }
+      const qtyM =
+        qtyInMasterUnit(quantity, unit || prod.unit, prod.unit) ??
+        (Number.isFinite(Number(quantity)) ? Number(quantity) : 0);
       const lineAmount =
         line.ocr_line_amount != null
           ? roundMoney(line.ocr_line_amount)
@@ -302,11 +319,19 @@ async function addUnknownProductsFromReport(vendorId, report, extractionId) {
         : line.ocr_line_amount != null && line.quantity
           ? roundMoney(line.ocr_line_amount / line.quantity)
           : 0;
+    // Prefer a real master unit when OCR left PCS on a dairy/grain item
+    let unit = normalizeUnit(line.unit) || 'KG';
+    const nameLower = String(line.raw_name || '').toLowerCase();
+    if (unit === 'PCS') {
+      if (/milk|દૂધ|oil|તેલ/.test(nameLower)) unit = 'L';
+      else unit = 'KG';
+    }
     const result = await createProduct(vendorId, {
-      name: line.raw_name,
+      name: line.base_name || line.raw_name,
       selling_price: selling,
       purchase_price: report.kind === 'purchase' ? selling : 0,
-      unit: line.unit || 'KG',
+      unit,
+      stock: 0,
     });
     created.push(result.product);
   }

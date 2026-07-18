@@ -23,6 +23,45 @@ function parseDashBillLine(rawLine) {
   const raw = String(rawLine || '').trim();
   if (!raw) return null;
 
+  // Preferred structured OCR row (do this BEFORE stripping WEIGHT/AMOUNT):
+  //   ITEM: Ghee | WEIGHT: 1 | AMOUNT: 200
+  //   ITEM: Sugar - 500gm | WEIGHT: 2 | AMOUNT: 250 | COUNT: 2
+  const structured = raw.match(
+    /^ITEM\s*:\s*(.+?)\s*\|\s*WEIGHT\s*:\s*([^|]*)\|\s*AMOUNT\s*:\s*([^\|]+)/i
+  );
+  if (structured) {
+    const namePart = structured[1].trim();
+    const weightPart = String(structured[2] || '').trim();
+    const amount = Number(String(structured[3]).replace(/[^\d.]/g, ''));
+    const countM = raw.match(/\|\s*COUNT\s*:\s*(\d+(?:\.\d+)?)/i);
+    const weightIsPack = new RegExp(
+      `\\d+(?:\\.\\d+)?\\s*(?:${PACK_UNIT})`,
+      'i'
+    ).test(weightPart);
+    const weightIsPlainQty =
+      weightPart && /^\d+(?:\.\d+)?$/.test(weightPart) && !weightIsPack;
+
+    let count = countM ? Number(countM[1]) : null;
+    let packHint = null;
+    if (count == null && weightIsPlainQty) count = Number(weightPart);
+    if (count == null && weightIsPack) {
+      packHint = weightPart;
+      count = 1;
+    }
+    if (count == null) count = 1;
+    if (weightIsPack) packHint = weightPart;
+
+    if (Number.isFinite(amount) && amount >= 0 && namePart) {
+      return buildParsed(
+        packHint && !/\d/.test(namePart) ? `${namePart} ${packHint}` : namePart,
+        packHint,
+        count,
+        amount,
+        raw
+      );
+    }
+  }
+
   let line = raw
     .replace(/^ITEM\s*:\s*/i, '')
     .replace(/^[-•*]\s*/, '')
@@ -231,8 +270,15 @@ function extractDashBillLines(ocrText) {
 function toStructuredItemLines(parsedItems) {
   return (parsedItems || []).map((p) => {
     const weight = p.pack_text || p.weight_text || '';
+    // When there is no pack size, put the sold count in WEIGHT so re-parsers
+    // never see a blank WEIGHT field (which used to drop rows).
+    const weightOut =
+      weight ||
+      (p.count != null && Number.isFinite(Number(p.count))
+        ? String(p.count)
+        : '');
     return (
-      `ITEM: ${p.display_name || p.name} | WEIGHT: ${weight} | AMOUNT: ${p.line_amount}` +
+      `ITEM: ${p.display_name || p.name} | WEIGHT: ${weightOut} | AMOUNT: ${p.line_amount}` +
       ` | COUNT: ${p.count} | UNIT_PRICE: ${p.unit_price}`
     );
   });

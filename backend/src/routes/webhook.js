@@ -1060,21 +1060,56 @@ async function handleConfirmationReply(vendor, confirm, msgCtx = {}) {
       if (!report) {
         return 'Verification data missing. Please resend the bill.';
       }
-      if (report.unknown_count > 0 && confirm !== 'update_price') {
-        // Allow YES only if user insists — still block if unknowns remain unless they added products
-        const stillUnknown = (report.lines || []).some(
-          (l) => l.status === 'unknown_product'
-        );
-        if (stillUnknown && confirm === 'yes') {
+
+      // Auto-create unknown products from bill unit prices so YES can resolve.
+      let workingReport = report;
+      const stillUnknown = (workingReport.lines || []).some(
+        (l) => l.status === 'unknown_product'
+      );
+      if (stillUnknown && (confirm === 'yes' || confirm === 'update_price')) {
+        try {
+          const created = await addUnknownProductsFromReport(
+            vendor.id,
+            workingReport,
+            pending.id
+          );
+          if (created.length) {
+            // Re-verify so new product_ids attach and prices compare cleanly
+            const reLines = (parsed.items || [])
+              .filter((i) => i && i.name)
+              .map((i) => ({
+                name: i.name,
+                name_en: i.name_en,
+                base_name: i.base_name || i.name_en || i.name,
+                quantity: i.count != null ? i.count : i.quantity,
+                count: i.count != null ? i.count : i.quantity,
+                unit: i.unit,
+                weight_text: i.pack_text || i.weight_text,
+                pack_text: i.pack_text || i.weight_text,
+                pack_qty: i.pack_qty,
+                pack_unit: i.pack_unit,
+                unit_price: i.unit_price,
+                line_amount: i.line_amount,
+              }));
+            workingReport = await verifyBill(
+              vendor.id,
+              reLines,
+              parsed.total_amount,
+              workingReport.kind || 'sale'
+            );
+            parsed.verification_report = workingReport;
+            await updatePendingParsed(pending.id, parsed);
+          }
+        } catch (err) {
+          console.error('[verify] auto-add products failed:', err.message);
           return (
-            'Still have unknown products.\n' +
-            'Reply *ADD PRODUCTS* to create them in Product Master first,\n' +
-            'or *NO* to cancel.'
+            `Could not add unknown products: ${err.message}\n` +
+            'Reply *ADD PRODUCTS* to add them step by step, or *NO* to cancel.'
           );
         }
       }
 
-      const result = await postVerifiedSale(vendor.id, pending, report, {
+      const result = await postVerifiedSale(vendor.id, pending, workingReport, {
         verificationId: parsed.verification_id,
         updateMasterPrices: confirm === 'update_price',
       });
@@ -1086,6 +1121,7 @@ async function handleConfirmationReply(vendor, confirm, msgCtx = {}) {
         `\n${result.itemCount} item(s)` +
         (result.party ? ` · ${result.party}` : '') +
         (confirm === 'update_price' ? '\n_Master selling prices updated._' : '') +
+        (stillUnknown ? '\n_Unknown items were added to Product Master from the bill._' : '') +
         `\n_Reply UNDO within 2 minutes to reverse journal._`
       );
     }

@@ -1,0 +1,105 @@
+import { useAuth } from '../context/AuthContext'
+
+const STATS = [
+  { label: 'Cash in hand', value: '₹42,850', hint: 'Today' },
+  { label: 'Receivables', value: '₹18,200', hint: '3 open' },
+  { label: 'Payables', value: '₹9,450', hint: '2 vendors' },
+  { label: 'Stock value', value: '₹1,26,000', hint: 'SKU snapshot' },
+]
+
+const ACTIVITY = [
+  { type: 'Sale', detail: 'Kirana order — 12 items', amount: '+₹2,340', time: '10:42' },
+  { type: 'Payment', detail: 'Received from Ramesh Traders', amount: '+₹5,000', time: '09:15' },
+  { type: 'Purchase', detail: 'Stock restock — oil & flour', amount: '−₹3,800', time: 'Yesterday' },
+  { type: 'Voice', detail: 'WhatsApp note parsed via /ai-order', amount: 'Pending', time: 'Yesterday' },
+]
+
+export default function Dashboard() {
+  const { session, logout } = useAuth()
+  const firstName = session?.name?.split(' ')[0] || 'there'
+
+  return (
+    <div className="dash">
+      <header className="dash-header">
+        <div className="brand brand-inline">
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="brand-name">LedgerBot</span>
+        </div>
+        <div className="dash-user">
+          <div className="dash-user-meta">
+            <strong>{session?.name}</strong>
+            <span>{session?.phone}</span>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={logout}>
+            Log out
+          </button>
+        </div>
+      </header>
+
+      <main className="dash-main">
+        <section className="dash-hero">
+          <p className="dash-eyebrow">Your books</p>
+          <h1>Good day, {firstName}</h1>
+          <p className="dash-lead">
+            Your invisible AI accountant is ready. Send WhatsApp messages, voice notes, or photos —
+            LedgerBot keeps the ledger tallied.
+          </p>
+        </section>
+
+        <section className="stat-grid" aria-label="Account snapshot">
+          {STATS.map((stat) => (
+            <article key={stat.label} className="stat">
+              <span className="stat-label">{stat.label}</span>
+              <strong className="stat-value">{stat.value}</strong>
+              <span className="stat-hint">{stat.hint}</span>
+            </article>
+          ))}
+        </section>
+
+        <section className="activity-panel">
+          <div className="panel-head">
+            <h2>Recent activity</h2>
+            <span className="panel-tag">Sample data</span>
+          </div>
+          <ul className="activity-list">
+            {ACTIVITY.map((item) => (
+              <li key={`${item.type}-${item.time}-${item.detail}`}>
+                <div>
+                  <strong>{item.type}</strong>
+                  <p>{item.detail}</p>
+                </div>
+                <div className="activity-meta">
+                  <span className="activity-amount">{item.amount}</span>
+                  <time>{item.time}</time>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="quick-actions">
+          <h2>WhatsApp shortcuts</h2>
+          <p>Use these commands in chat once your number is linked.</p>
+          <ul className="command-list">
+            <li>
+              <code>/ai-order</code>
+              <span>Log a sale from text, voice, or photo</span>
+            </li>
+            <li>
+              <code>/ai-stock</code>
+              <span>Update inventory</span>
+            </li>
+            <li>
+              <code>/ai-payment</code>
+              <span>Record money in or out</span>
+            </li>
+            <li>
+              <code>/ai-report</code>
+              <span>Ask for a quick summary</span>
+            </li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  )
+}

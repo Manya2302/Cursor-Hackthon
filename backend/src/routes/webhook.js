@@ -9,6 +9,11 @@ const {
 } = require('../services/groq');
 const { extractDocumentText } = require('../services/documents');
 const {
+  runPriceVerification,
+  persistVerificationArtifacts,
+} = require('../services/verification');
+const { getTodayProfitMessage } = require('../services/reports');
+const {
   stageRawExtraction,
   getLatestPendingExtraction,
   rejectPendingExtraction,
@@ -163,6 +168,7 @@ async function analyzeAndStage({
 
   // Improve Gujarati bill fields (digits, weights, item lexicon, name_en)
   parsed = enrichParsedBill(parsed, cleaned);
+  parsed.detected_language = detectedLanguage;
 
   // Prefer OCR template identity when the LLM left party blank
   if (inputType === 'image' && parsed?.intent === 'transaction') {
@@ -268,6 +274,15 @@ async function analyzeAndStage({
     parsed.identity_verify = { needsVerify: false, verified: true, reasons: [] };
   }
 
+  // Product-master verification: expected totals, price mismatches, unknown products.
+  if (parsed.intent === 'transaction' || parsed.intent === 'inventory_bulk') {
+    try {
+      parsed.verification = await runPriceVerification(vendor.id, parsed);
+    } catch (err) {
+      console.error('[verify] failed:', err.message);
+    }
+  }
+
   const staged = await stageRawExtraction({
     vendorId: vendor.id,
     inputType,
@@ -285,6 +300,20 @@ async function analyzeAndStage({
     );
   }
 
+  // Best-effort audit trail for OCR and verification artifacts.
+  try {
+    await persistVerificationArtifacts({
+      vendorId: vendor.id,
+      extractionId: staged.id,
+      inputType,
+      mediaUrl,
+      rawInput: agentInput,
+      parsed,
+    });
+  } catch (err) {
+    console.error('[verify] persist failed:', err.message);
+  }
+
   return buildConfirmationSummary(parsed);
 }
 
@@ -299,6 +328,15 @@ async function handleText(vendor, userText) {
   if (identityFix) {
     const fixed = await handleIdentityCorrection(vendor, identityFix);
     if (fixed) return fixed;
+  }
+
+  if (isTodayProfitQuery(userText)) {
+    try {
+      return await getTodayProfitMessage(vendor.id);
+    } catch (err) {
+      console.error('[report] today profit failed:', err.message);
+      return 'Could not fetch today profit right now. Please try again.';
+    }
   }
 
   return analyzeAndStage({
@@ -411,6 +449,29 @@ async function handleConfirmationReply(vendor, confirm) {
     }
   }
 
+  if (confirm === 'update_price' || confirm === 'keep_price') {
+    parsed.apply_price_update = confirm === 'update_price';
+    parsed.verification = {
+      ...(parsed.verification || {}),
+      resolution_action:
+        confirm === 'update_price' ? 'update_master_price' : 'keep_master_price',
+      status:
+        confirm === 'update_price'
+          ? 'price_updated'
+          : parsed.verification?.status || 'accepted_with_warning',
+    };
+    if (parsed?.intent === 'transaction') {
+      parsed.identity_verify = {
+        ...(parsed.identity_verify || {}),
+        needsVerify: false,
+        verified: true,
+        verified_at: new Date().toISOString(),
+        reasons: ['user chose verification action'],
+      };
+    }
+    await updatePendingParsed(pending.id, parsed);
+  }
+
   if (
     confirm === 'yes' &&
     parsed?.intent === 'transaction' &&
@@ -437,6 +498,7 @@ async function handleConfirmationReply(vendor, confirm) {
         .join('\n');
       return (
         `✅ *Saved ${result.count} product(s)* to inventory.\n${preview}` +
+        (result.newProducts > 0 ? `\n🆕 Added ${result.newProducts} new product(s) to master.` : '') +
         (result.count > 8 ? `\n…and ${result.count - 8} more` : '')
       );
     }
@@ -449,12 +511,17 @@ async function handleConfirmationReply(vendor, confirm) {
       const partyBit = result.party ? ` · ${result.party}` : '';
       const amountBit =
         result.salesTotal > 0 ? `Amount ₹${result.salesTotal}` : 'Amount not on bill (saved as blank)';
+      const profitBit =
+        result.profit != null
+          ? `\n📈 Profit ${result.profit >= 0 ? '+' : '-'}₹${Math.abs(result.profit).toFixed(2)}`
+          : '';
       return (
         `✅ *Saved to journal${incomplete ? ' (with missing fields as blank)' : ''}.*\n` +
         `${amountBit}` +
         `${result.cashTotal ? ` · cash ₹${result.cashTotal}` : ''}` +
         `${result.udhaarTotal ? ` · udhaar ₹${result.udhaarTotal}` : ''}` +
-        `${partyBit}`
+        `${partyBit}` +
+        `${profitBit}`
       );
     }
 
@@ -472,6 +539,15 @@ async function handleConfirmationReply(vendor, confirm) {
     console.error('[confirm] failed:', err.message);
     return `Could not save: ${err.message}. Please send the details again.`;
   }
+}
+
+function isTodayProfitQuery(text) {
+  const t = String(text || '').toLowerCase();
+  return (
+    /(today|aaj|આજ|હમણાં).{0,15}profit/.test(t) ||
+    /profit.{0,15}(today|aaj|આજ|હમણાં)/.test(t) ||
+    /\btoday\s*p&l\b/.test(t)
+  );
 }
 
 async function handleVoice(vendor, message) {

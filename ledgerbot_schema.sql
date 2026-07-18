@@ -1,11 +1,7 @@
 -- ============================================================================
--- LedgerBot — Complete Database Schema (Supabase / Postgres)
--- Run this entire file once against a fresh Supabase project (SQL Editor,
--- or `psql` / `supabase db push`). It creates every table, the core
--- balance-enforcing trigger, indexes, RLS, and a set of callable functions
--- that the backend/AI uses to RETRIEVE statement data — the AI never
--- computes these numbers itself, it only calls these functions and formats
--- the result.
+-- LedgerBot — Base Database Schema (Supabase / Postgres)
+-- Run this file first, then run `migrations/002_vendor_product_master.sql`
+-- for Product Master + OCR verification + advanced inventory/accounting flow.
 -- ============================================================================
 
 create extension if not exists pgcrypto;

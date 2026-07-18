@@ -33,15 +33,18 @@ start.bat         # Starts backend + frontend + ngrok
 
 ---
 
-## 1. Run the SQL migration (Supabase)
+## 1. Run the SQL migrations (Supabase)
 
 1. Create a project at [https://supabase.com](https://supabase.com).
-2. Open **SQL Editor** → paste [`migrations/001_init.sql`](migrations/001_init.sql) → Run.
+2. Open **SQL Editor** and run, in order:
+   - [`migrations/001_init.sql`](migrations/001_init.sql)
+   - [`migrations/002_vendor_product_master.sql`](migrations/002_vendor_product_master.sql)
 
 Or with `psql`:
 
 ```bash
 psql "postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres" -f migrations/001_init.sql
+psql "postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres" -f migrations/002_vendor_product_master.sql
 ```
 
 ---
@@ -147,3 +150,27 @@ Copy the HTTPS forwarding URL, e.g. `https://abc123.ngrok-free.app`.
 - `POST /webhook` always returns **200 immediately**, then processes (vendor upsert + reply) asynchronously so Meta never times out or retries from slow work.
 - Meta API and Supabase errors are logged; they never crash the process or change the webhook HTTP status.
 - The service-role key bypasses RLS; keep it server-side only.
+
+---
+
+## Common measure reference (billing shorthand)
+
+LedgerBot normalizes frequent handwritten/billing units so short forms are interpreted consistently.
+
+| Bill text example | Meaning | Normalized parse |
+|---|---|---|
+| `1 kilo`, `1 kg`, `1 ki` | 1 kilogram | `quantity: 1, unit: KG` |
+| `ardho kilo` | half kilo | `quantity: 0.5, unit: KG` |
+| `pono kilo` | three-quarter kilo | `quantity: 0.75, unit: KG` |
+| `sava kilo` | one-and-quarter kilo | `quantity: 1.25, unit: KG` |
+| `dodh kilo` | one-and-half kilo | `quantity: 1.5, unit: KG` |
+| `1 pav` | quarter kilo | `quantity: 250, unit: GM` |
+| `2 pav` | half kilo total | `quantity: 500, unit: GM` |
+| `1 tola` | traditional jewelry weight | `quantity: 11.66, unit: GM` |
+| `1 mann` | traditional bulk farm unit | `quantity: 1, unit: MANN` |
+| `1 liter`, `1 ltr` | 1 liter liquid | `quantity: 1, unit: L` |
+| `500 ml` | 500 milliliters | `quantity: 500, unit: ML` |
+
+The source of truth for this mapping is:
+- `backend/src/utils/gujarati.js` → `COMMON_MEASURE_REFERENCE`
+- `backend/src/utils/gujarati.js` → `parseWeightText()`

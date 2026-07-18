@@ -1,6 +1,6 @@
 /**
  * Detect YES / NO confirmation replies for a pending extraction.
- * @returns {'yes' | 'no' | 'save_as_is' | null}
+ * @returns {'yes' | 'no' | 'save_as_is' | 'update_price' | 'keep_price' | null}
  */
 function parseConfirmationReply(text) {
   if (!text || typeof text !== 'string') return null;
@@ -15,6 +15,22 @@ function parseConfirmationReply(text) {
     t === 'save as is'
   ) {
     return 'save_as_is';
+  }
+
+  if (
+    /^(update\s*(the\s*)?(master\s*)?price|use\s*invoice\s*price|set\s*new\s*price)$/i.test(
+      t
+    )
+  ) {
+    return 'update_price';
+  }
+
+  if (
+    /^(keep\s*(existing\s*)?price|keep\s*master\s*price|no\s*price\s*update)$/i.test(
+      t
+    )
+  ) {
+    return 'keep_price';
   }
 
   const yes = new Set([

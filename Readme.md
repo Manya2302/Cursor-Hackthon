@@ -2,13 +2,13 @@
 
 **An invisible AI accountant that lives inside WhatsApp.**
 
-LedgerBot lets small business owners — kirana stores, small manufacturers, coaching centres, retailers — keep real, tallied, double-entry books just by sending the WhatsApp messages, voice notes, and photos they already send today. No new app to learn, no dashboard to maintain, no behavior change. Behind every message, a proper accounting engine silently keeps the books, and on request produces real, downloadable financial statements — in English, Hindi, or Gujarati.
+LedgerBot lets small business owners — kirana stores, small manufacturers, coaching centres, retailers — keep real, tallied, double-entry books just by sending the WhatsApp messages, voice notes, and photos they already send today.
 
 ---
 
 ## Current phase
 
-**Phase 1 — foundation only:** Postgres schema (tables, constraints, journal-balance trigger, indexes, RLS) and a booting Express server. No business logic yet.
+**Phase 3 — Groq extraction:** command-triggered WhatsApp input (`/ai-order`, `/ai-stock`, `/ai-payment`, `/ai-report`, `/ai-stock-bulk`) is transcribed/OCR'd when needed, parsed into structured JSON via Groq, staged in `raw_extractions` as `pending_confirmation`, and echoed back for YES/NO. No journal posting yet (Phase 4).
 
 ---
 
@@ -16,8 +16,8 @@ LedgerBot lets small business owners — kirana stores, small manufacturers, coa
 
 - **Backend:** Node.js, Express
 - **Database:** Supabase (Postgres) via `@supabase/supabase-js`
+- **Messaging:** Meta WhatsApp Cloud API
 - **LLM:** Groq API (wired later)
-- **Messaging:** Meta WhatsApp Cloud API (wired later)
 
 ---
 
@@ -25,17 +25,21 @@ LedgerBot lets small business owners — kirana stores, small manufacturers, coa
 
 ```
 backend/
-├── server.js                 # Entry point
+├── server.js
 ├── package.json
 ├── .env.example
 ├── src/
-│   ├── app.js                # Express middleware wiring
+│   ├── app.js
 │   ├── config/
-│   │   └── supabase.js       # Supabase JS client (service role)
-│   └── routes/
-│       └── health.js         # GET / → { status: 'ok' }
+│   │   └── supabase.js
+│   ├── routes/
+│   │   ├── health.js          # GET / → { status: 'ok' }
+│   │   └── webhook.js         # GET+POST /webhook
+│   └── services/
+│       ├── whatsapp.js        # sendText / downloadMedia / sendDocument
+│       └── vendors.js         # upsert vendor by WhatsApp phone
 migrations/
-└── 001_init.sql              # Schema, trigger, indexes, RLS
+└── 001_init.sql
 ```
 
 ---
@@ -43,21 +47,13 @@ migrations/
 ## 1. Run the SQL migration (Supabase)
 
 1. Create a project at [https://supabase.com](https://supabase.com).
-2. Open **SQL Editor** in the Supabase dashboard.
-3. Paste the contents of [`migrations/001_init.sql`](migrations/001_init.sql) and run it.
+2. Open **SQL Editor** → paste [`migrations/001_init.sql`](migrations/001_init.sql) → Run.
 
-Or with `psql` (replace with your database URL from **Project Settings → Database**):
+Or with `psql`:
 
 ```bash
 psql "postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres" -f migrations/001_init.sql
 ```
-
-The migration creates:
-
-- Tables: `vendors`, `parties`, `accounts`, `journal_entries`, `journal_lines`, `products`, `stock_ledger`, `raw_extractions`
-- Unique party names per vendor (case-insensitive): `(vendor_id, lower(name))`
-- Trigger `check_journal_balance()` so every journal entry’s debits must equal credits
-- Indexes and Row Level Security policies (placeholder `auth.uid()` vendor scoping)
 
 ---
 
@@ -68,16 +64,14 @@ cd backend
 cp .env.example .env
 ```
 
-Fill in `backend/.env`:
-
 | Variable | Description |
 |---|---|
-| `SUPABASE_URL` | Project URL from Supabase → Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server-side only; never expose to clients) |
+| `SUPABASE_URL` | Project URL → Settings → API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server only; bypasses RLS) |
 | `WHATSAPP_TOKEN` | Meta WhatsApp Cloud API access token |
 | `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp phone number ID |
-| `WHATSAPP_VERIFY_TOKEN` | Webhook verify token you choose |
-| `GROQ_API_KEY` | Groq API key |
+| `WHATSAPP_VERIFY_TOKEN` | Any string you choose (must match Meta dashboard) |
+| `GROQ_API_KEY` | Groq API key (later phases) |
 | `PORT` | HTTP port (default `3000`) |
 
 ---
@@ -88,15 +82,67 @@ Fill in `backend/.env`:
 cd backend
 npm install
 npm start
-# or: node server.js
 ```
 
-Health check: `GET http://localhost:3000/` → `{ "status": "ok" }`
+- Health: `GET http://localhost:3000/` → `{ "status": "ok" }`
+- Webhook verify: `GET http://localhost:3000/webhook?...` (configured by Meta)
+- Webhook inbound: `POST http://localhost:3000/webhook`
+
+---
+
+## 4. WhatsApp Cloud API setup (Meta)
+
+### A. Create a Meta developer app
+
+1. Go to [https://developers.facebook.com](https://developers.facebook.com) → **My Apps** → **Create App**.
+2. Choose **Business** (or Other → Business), name it e.g. `LedgerBot`.
+3. In the app dashboard, add the **WhatsApp** product → **API Setup**.
+
+### B. Temporary test token + phone number ID
+
+1. On **WhatsApp → API Setup**, copy:
+   - **Temporary access token** → `WHATSAPP_TOKEN` (expires in ~24h; replace with a permanent System User token for production)
+   - **Phone number ID** → `WHATSAPP_PHONE_NUMBER_ID`
+2. Paste both into `backend/.env`.
+
+### C. Add test recipient numbers
+
+1. Under **To**, click **Manage phone number list**.
+2. Add your personal WhatsApp number and complete the SMS/voice verification code.
+3. Only numbers on this allowlist can message / be messaged while using the test number.
+
+### D. Run the backend + expose it with ngrok
+
+```bash
+# Terminal 1 — API
+cd backend
+npm start
+
+# Terminal 2 — public HTTPS tunnel to local :3000
+ngrok http 3000
+```
+
+Copy the HTTPS forwarding URL, e.g. `https://abc123.ngrok-free.app`.
+
+### E. Configure the webhook in Meta
+
+1. In the WhatsApp product, open **Configuration** (or API Setup → Webhook).
+2. **Callback URL:** `https://abc123.ngrok-free.app/webhook`
+3. **Verify token:** the same value as `WHATSAPP_VERIFY_TOKEN` in `.env` (e.g. `manya123`).
+4. Click **Verify and save**. Meta sends `GET /webhook` with `hub.mode`, `hub.verify_token`, and `hub.challenge`; the server returns the challenge when the token matches.
+5. Subscribe to the **messages** field under webhook fields.
+
+### F. End-to-end smoke test
+
+1. From your allowlisted phone, send a WhatsApp text to the Meta test number.
+2. You should receive an echo: `Received: <your text>`.
+3. In Supabase **Table Editor → vendors**, confirm a new row whose `phone` matches your WhatsApp `wa_id` (first contact only creates; later messages reuse the same row).
+4. Voice notes reply `Received voice note`; images reply `Received image`.
 
 ---
 
 ## Notes
 
-- The service-role key **bypasses RLS**. RLS policies are in place for a future per-vendor frontend session using `auth.uid()`.
-- The journal balance trigger is **deferrable** so you can insert multiple `journal_lines` in one transaction; balance is checked at commit.
-- Do not put business logic in this phase — posting, webhooks, and statements come later.
+- `POST /webhook` always returns **200 immediately**, then processes (vendor upsert + reply) asynchronously so Meta never times out or retries from slow work.
+- Meta API and Supabase errors are logged; they never crash the process or change the webhook HTTP status.
+- The service-role key bypasses RLS; keep it server-side only.

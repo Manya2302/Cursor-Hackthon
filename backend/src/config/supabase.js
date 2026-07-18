@@ -5,7 +5,7 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
   console.warn(
-    'Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set. Database calls will fail until configured.'
+    'Warning: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must both be set. Vendor upsert and DB calls will fail until configured.'
   );
 }
 

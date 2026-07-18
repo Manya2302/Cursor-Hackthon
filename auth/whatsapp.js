@@ -32,7 +32,8 @@ async function sendHiMessage(phone, name) {
   const token = getToken();
   const phoneNumberId = getPhoneNumberId();
   const to = toWhatsAppAddress(phone);
-  const firstName = String(name || 'there').trim().split(/\s+/)[0] || 'there';
+  // Use the full vendor name entered at registration (not a shortened first name).
+  const vendorName = String(name || '').trim() || 'there';
 
   if (!token || !phoneNumberId) {
     const err = new Error(
@@ -42,7 +43,7 @@ async function sendHiMessage(phone, name) {
     throw err;
   }
 
-  const textBody = `Hi ${firstName}`;
+  const textBody = `Hi ${vendorName}`;
   const textResult = await postMessage(phoneNumberId, token, {
     messaging_product: 'whatsapp',
     to,
@@ -51,7 +52,7 @@ async function sendHiMessage(phone, name) {
   });
 
   if (textResult.ok) {
-    return { ok: true, mode: 'text', body: textResult.body };
+    return { ok: true, mode: 'text', body: textResult.body, text: textBody };
   }
 
   // Outside the 24h session window Meta often requires a template.
@@ -75,7 +76,7 @@ async function sendHiMessage(phone, name) {
         {
           type: 'body',
           parameters: [
-            { type: 'text', text: firstName },
+            { type: 'text', text: vendorName },
             { type: 'text', text: 'Welcome' },
             { type: 'text', text: today },
           ],

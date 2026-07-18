@@ -85,7 +85,7 @@ export default function Register() {
     }
   }
 
-  const firstName = (newUser?.name || form.name || '').split(' ')[0] || 'there'
+  const vendorName = newUser?.name || form.name || 'there'
 
   return (
     <AuthShell
@@ -217,13 +217,12 @@ export default function Register() {
       {step === 2 && newUser && (
         <div className="passcode-reveal">
           <p className="form-note success-note">
-            You&apos;re verified, {firstName}. We sent a WhatsApp hello to your
-            number.
+            You&apos;re verified. We sent a WhatsApp message to your number.
           </p>
           <div className="passcode-box">
             <span className="passcode-label">WhatsApp message</span>
             <strong className="passcode-value" style={{ letterSpacing: '0.04em' }}>
-              Hi {firstName}
+              Hi {vendorName}
             </strong>
             <span style={{ fontSize: '0.85rem', opacity: 0.85 }}>
               {whatsapp?.ok

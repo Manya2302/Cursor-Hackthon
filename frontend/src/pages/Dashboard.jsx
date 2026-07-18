@@ -11,7 +11,7 @@ const ACTIVITY = [
   { type: 'Sale', detail: 'Kirana order — 12 items', amount: '+₹2,340', time: '10:42' },
   { type: 'Payment', detail: 'Received from Ramesh Traders', amount: '+₹5,000', time: '09:15' },
   { type: 'Purchase', detail: 'Stock restock — oil & flour', amount: '−₹3,800', time: 'Yesterday' },
-  { type: 'Voice', detail: 'WhatsApp note parsed via /ai-order', amount: 'Pending', time: 'Yesterday' },
+  { type: 'Voice', detail: 'WhatsApp note parsed by LedgerBot AI', amount: 'Pending', time: 'Yesterday' },
 ]
 
 export default function Dashboard() {

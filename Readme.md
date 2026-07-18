@@ -15,31 +15,20 @@ LedgerBot lets small business owners — kirana stores, small manufacturers, coa
 ## Tech stack
 
 - **Backend:** Node.js, Express
+- **Frontend:** React + Vite (`frontend/`) — login/register/dashboard (local auth for now)
 - **Database:** Supabase (Postgres) via `@supabase/supabase-js`
 - **Messaging:** Meta WhatsApp Cloud API
-- **LLM:** Groq API (wired later)
+- **LLM:** Groq API (OCR + intent extraction)
 
 ---
 
-## Project layout (backend)
+## Project layout
 
 ```
-backend/
-├── server.js
-├── package.json
-├── .env.example
-├── src/
-│   ├── app.js
-│   ├── config/
-│   │   └── supabase.js
-│   ├── routes/
-│   │   ├── health.js          # GET / → { status: 'ok' }
-│   │   └── webhook.js         # GET+POST /webhook
-│   └── services/
-│       ├── whatsapp.js        # sendText / downloadMedia / sendDocument
-│       └── vendors.js         # upsert vendor by WhatsApp phone
-migrations/
-└── 001_init.sql
+backend/          # WhatsApp webhook + AI agent
+frontend/         # React web UI (college teammate)
+migrations/       # Postgres schema
+start.bat         # Starts backend + frontend + ngrok
 ```
 
 ---
@@ -83,6 +72,18 @@ cd backend
 npm install
 npm start
 ```
+
+### Frontend (React)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** — register / login / dashboard.
+
+Or run everything with `start.bat` (backend + frontend + ngrok).
 
 - Health: `GET http://localhost:3000/` → `{ "status": "ok" }`
 - Webhook verify: `GET http://localhost:3000/webhook?...` (configured by Meta)

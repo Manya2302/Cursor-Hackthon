@@ -75,6 +75,12 @@ function formatTransactionBill(parsed) {
     lines.push(`💰 Total *₹${formatMoney(parsed.total_amount)}*`);
   }
 
+  const verificationLines = formatVerificationSummary(parsed.verification);
+  if (verificationLines.length) {
+    lines.push('');
+    lines.push(...verificationLines);
+  }
+
   lines.push('');
   if (missingIdentity) {
     lines.push(
@@ -89,6 +95,13 @@ function formatTransactionBill(parsed) {
     lines.push('✅ Name / phone added.\nReply *YES* to save, or *NO* to cancel.');
   } else {
     lines.push('Reply *YES* to save, or *NO* to cancel.');
+  }
+
+  if (parsed.verification?.status && parsed.verification.status !== 'verified') {
+    lines.push(
+      'If price mismatch is correct, reply *UPDATE PRICE* to save and update master price.\n' +
+        'Or reply *KEEP PRICE* to save without changing master price.'
+    );
   }
 
   return lines.join('\n');
@@ -132,6 +145,12 @@ function formatInventoryBill(parsed) {
   });
   if (rows.length > 8) lines.push(`…+${rows.length - 8} more`);
 
+  const verificationLines = formatVerificationSummary(parsed.verification);
+  if (verificationLines.length) {
+    lines.push('');
+    lines.push(...verificationLines);
+  }
+
   lines.push('');
   if (missingIdentity) {
     lines.push(
@@ -147,7 +166,59 @@ function formatInventoryBill(parsed) {
   } else {
     lines.push('Reply *YES* to save, or *NO* to cancel.');
   }
+
+  if (parsed.verification?.status && parsed.verification.status !== 'verified') {
+    lines.push(
+      'For this price list, reply *UPDATE PRICE* to accept and refresh master prices,\n' +
+        'or *KEEP PRICE* to keep current master price.'
+    );
+  }
   return lines.join('\n');
+}
+
+function formatVerificationSummary(verification) {
+  if (!verification || typeof verification !== 'object') return [];
+
+  const lines = [];
+  const statusMap = {
+    verified: '✅ Verified against Product Master',
+    needs_review: '⚠️ Needs review before final save',
+    accepted_with_warning: '⚠️ Mismatch found (can save with warning)',
+    pending: '⏳ Verification pending',
+    rejected: '❌ Verification rejected',
+    price_updated: '✅ Verified with price update',
+  };
+  if (verification.status) {
+    lines.push(statusMap[verification.status] || `ℹ️ Verification: ${verification.status}`);
+  }
+
+  if (verification.expected_total != null) {
+    lines.push(`Expected total: ₹${formatMoney(verification.expected_total)}`);
+  }
+  if (verification.detected_total != null) {
+    lines.push(`Detected total: ₹${formatMoney(verification.detected_total)}`);
+  }
+  if (verification.difference_amount != null) {
+    const diff = Number(verification.difference_amount);
+    const sign = diff >= 0 ? '+' : '-';
+    lines.push(`Difference: ${sign}₹${formatMoney(Math.abs(diff))}`);
+  }
+
+  if (Array.isArray(verification.unknown_products) && verification.unknown_products.length) {
+    lines.push(
+      `New products not in master: ${verification.unknown_products.slice(0, 6).join(', ')}`
+    );
+  }
+
+  if (Array.isArray(verification.item_mismatches) && verification.item_mismatches.length) {
+    const top = verification.item_mismatches.slice(0, 3).map((m) => {
+      const sign = Number(m.difference) >= 0 ? '+' : '-';
+      return `${m.product}: ${sign}₹${formatMoney(Math.abs(m.difference))}`;
+    });
+    lines.push(`Price mismatch: ${top.join(' | ')}`);
+  }
+
+  return lines;
 }
 
 function formatWeight(quantity, unit) {

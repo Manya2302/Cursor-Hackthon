@@ -1,4 +1,12 @@
 const { Pool } = require('pg');
+const {
+  ensureProductMaster,
+  ensureSupplierParty,
+  upsertProductPrice,
+  deriveQuantityAndUnit,
+  normalizeUnit,
+  createLegacyProductId,
+} = require('./productMaster');
 
 let pool = null;
 
@@ -15,7 +23,10 @@ function getPool() {
 }
 
 function productIdFor(vendorId, name) {
-  return `${vendorId}:${String(name).toLowerCase().replace(/\s+/g, '_')}`;
+  return createLegacyProductId(
+    vendorId,
+    String(name).toLowerCase().trim().replace(/\s+/g, ' ')
+  );
 }
 
 /**
@@ -28,10 +39,13 @@ function collectProductRows(parsed) {
     : [];
   for (const p of updates) {
     if (!p?.name) continue;
+    const pStock = Number(p.stock);
+    const pPrice = Number(p.price);
     rows.push({
       name: p.name,
-      stock: p.stock != null ? Number(p.stock) : null,
-      price: p.price != null ? Number(p.price) : null,
+      stock: Number.isFinite(pStock) ? pStock : null,
+      price: Number.isFinite(pPrice) ? pPrice : null,
+      unit: normalizeUnit(p.unit || p.category),
       category: p.category || null,
       supplier: parsed.party?.name || null,
     });
@@ -41,16 +55,25 @@ function collectProductRows(parsed) {
   if (rows.length === 0 && Array.isArray(parsed.items)) {
     for (const item of parsed.items) {
       if (!item?.name) continue;
+      const { quantity, unit } = deriveQuantityAndUnit(item);
+      const directPrice = Number(item.unit_price);
+      const lineAmount = Number(item.line_amount);
+      let perUnitPrice = null;
+      if (Number.isFinite(directPrice)) perUnitPrice = directPrice;
+      else if (
+        Number.isFinite(lineAmount) &&
+        Number.isFinite(quantity) &&
+        Number(quantity) > 0
+      ) {
+        perUnitPrice = Number((lineAmount / Number(quantity)).toFixed(2));
+      }
+
       rows.push({
         name: item.name,
-        stock: item.quantity != null ? Number(item.quantity) : null,
-        price:
-          item.line_amount != null
-            ? Number(item.line_amount)
-            : item.unit_price != null
-              ? Number(item.unit_price)
-              : null,
-        category: item.unit || item.weight_text || null,
+        stock: quantity != null ? Number(quantity) : null,
+        price: perUnitPrice,
+        unit,
+        category: unit || item.weight_text || null,
         supplier: parsed.party?.name || null,
       });
     }
@@ -75,50 +98,118 @@ async function postInventory(vendorId, extraction) {
   if (!rows.length) {
     throw new Error('No products found to save');
   }
+  const applyPriceUpdate = parsed.apply_price_update !== false;
 
   const client = await pg.connect();
   const saved = [];
+  let newProducts = 0;
 
   try {
     await client.query('begin');
+    const supplierPartyId = parsed.party?.name
+      ? await ensureSupplierParty(client, vendorId, parsed.party.name)
+      : null;
 
     for (const row of rows) {
-      const id = productIdFor(vendorId, row.name);
       const stock = Number.isFinite(row.stock) ? row.stock : 0;
-      const price = Number.isFinite(row.price) ? row.price : 0;
+      const price = Number.isFinite(row.price) ? Number(row.price) : null;
+      const baseUnit = row.unit || 'PIECE';
 
-      const existing = await client.query(
+      const master = await ensureProductMaster(client, vendorId, {
+        productName: row.name,
+        unit: baseUnit,
+        supplierPartyId,
+        categoryName: row.category,
+        price,
+        priceType: 'purchase',
+        createIfMissing: true,
+      });
+      if (master?.created) newProducts += 1;
+
+      if (applyPriceUpdate && price != null && master?.productId) {
+        await upsertProductPrice(client, vendorId, master.productId, {
+          supplierPartyId,
+          priceType: 'purchase',
+          unit: baseUnit,
+          amount: price,
+          reason: 'inventory_bulk_confirmation',
+          updatedBy: 'whatsapp_user',
+        });
+      }
+
+      const legacyId = master?.legacy
+        ? master.productId
+        : productIdFor(vendorId, master?.normalizedName || row.name);
+      const legacy = await client.query(
         `select id, stock from products where id = $1`,
-        [id]
+        [legacyId]
+      );
+      const oldStock = Number(legacy.rows[0]?.stock || 0);
+      const nextStock = row.stock != null ? oldStock + stock : oldStock;
+      await client.query(
+        `insert into products
+           (id, vendor_id, product_name, category, stock, price, supplier, last_updated)
+         values ($1, $2, $3, $4, $5, coalesce($6, 0), $7, now())
+         on conflict (id) do update
+           set product_name = excluded.product_name,
+               category = coalesce(excluded.category, products.category),
+               stock = $8,
+               price = case when $6 is not null and $6 > 0 then $6 else products.price end,
+               supplier = coalesce(excluded.supplier, products.supplier),
+               last_updated = now()`,
+        [
+          legacyId,
+          vendorId,
+          row.name,
+          row.category,
+          nextStock,
+          price,
+          row.supplier,
+          nextStock,
+        ]
       );
 
-      let newStock;
-      if (existing.rows[0]) {
-        // Add incoming stock onto existing level when quantity is provided
-        newStock =
-          row.stock != null
-            ? Number(existing.rows[0].stock) + stock
-            : Number(existing.rows[0].stock);
-
+      if (master && !master.legacy && row.stock != null && stock !== 0) {
         await client.query(
-          `update products
-              set product_name = $2,
-                  stock = $3,
-                  price = case when $4 > 0 then $4 else price end,
-                  category = coalesce($5, category),
-                  supplier = coalesce($6, supplier),
-                  last_updated = now()
+          `update product_master
+              set current_stock = current_stock + $2,
+                  updated_at = now()
             where id = $1`,
-          [id, row.name, newStock, price, row.category, row.supplier]
+          [master.productId, stock]
         );
-      } else {
-        newStock = stock;
-        await client.query(
-          `insert into products
-             (id, vendor_id, product_name, category, stock, price, supplier, last_updated)
-           values ($1, $2, $3, $4, $5, $6, $7, now())`,
-          [id, vendorId, row.name, row.category, stock, price, row.supplier]
-        );
+        try {
+          await client.query(
+            `insert into inventory (vendor_id, product_id, current_stock, average_cost, stock_valuation, updated_at)
+             values ($1, $2, $3, $4, $5, now())
+             on conflict (product_id) do update
+               set current_stock = inventory.current_stock + excluded.current_stock,
+                   average_cost = coalesce(excluded.average_cost, inventory.average_cost),
+                   stock_valuation = coalesce(inventory.stock_valuation, 0) + (excluded.current_stock * coalesce(excluded.average_cost, 0)),
+                   updated_at = now()`,
+            [vendorId, master.productId, stock, price, price != null ? stock * price : null]
+          );
+        } catch (err) {
+          if (err?.code !== '42P01') throw err;
+        }
+      }
+
+      if (master && !master.legacy && supplierPartyId) {
+        try {
+          await client.query(
+            `insert into supplier_products
+               (vendor_id, supplier_party_id, product_id, supplier_product_name, last_purchase_price, last_purchase_date, is_preferred)
+             values ($1, $2, $3, $4, $5, current_date, true)
+             on conflict (vendor_id, supplier_party_id, product_id) do update
+               set supplier_product_name = coalesce(excluded.supplier_product_name, supplier_products.supplier_product_name),
+                   last_purchase_price = coalesce(excluded.last_purchase_price, supplier_products.last_purchase_price),
+                   last_purchase_date = current_date,
+                   is_preferred = true,
+                   updated_at = now()`,
+            [vendorId, supplierPartyId, master.productId, row.name, price]
+          );
+        } catch (err) {
+          if (err?.code !== '42P01') throw err;
+        }
       }
 
       if (row.stock != null && Number(row.stock) !== 0) {
@@ -126,27 +217,58 @@ async function postInventory(vendorId, extraction) {
           `insert into stock_ledger
              (vendor_id, product_id, change, reason, source_extraction_id, new_stock_level)
            values ($1, $2, $3, 'bulk_upload', $4, $5)`,
-          [vendorId, id, stock, extraction.id, newStock]
+          [vendorId, legacyId, stock, extraction.id, nextStock]
         );
+        if (master && !master.legacy) {
+          try {
+            await client.query(
+              `insert into inventory_movements
+                 (vendor_id, product_id, movement_type, quantity, unit, converted_quantity, reference_type, reference_id, notes)
+               values ($1, $2, 'purchase', $3, $4, $3, 'raw_extraction', $5, $6)`,
+              [vendorId, master.productId, stock, baseUnit, extraction.id, 'inventory_bulk']
+            );
+          } catch (err) {
+            if (err?.code !== '42P01') throw err;
+          }
+        }
       }
 
       saved.push({
         name: row.name,
-        stock: newStock,
+        stock: nextStock,
         price,
         supplier: row.supplier,
+        unit: baseUnit,
+        productId: master?.productId || legacyId,
       });
     }
 
-    await client.query(
-      `update raw_extractions
-          set status = 'confirmed', confirmed_at = now()
-        where id = $1`,
-      [extraction.id]
-    );
+    try {
+      await client.query(
+        `update raw_extractions
+            set status = 'confirmed',
+                confirmed_at = now(),
+                verification_status = coalesce($2::verification_status_enum, verification_status),
+                verification_summary = coalesce($3::jsonb, verification_summary)
+          where id = $1`,
+        [
+          extraction.id,
+          parsed?.verification?.status || null,
+          parsed?.verification ? JSON.stringify(parsed.verification) : null,
+        ]
+      );
+    } catch (err) {
+      if (err?.code !== '42703' && err?.code !== '42704') throw err;
+      await client.query(
+        `update raw_extractions
+            set status = 'confirmed', confirmed_at = now()
+          where id = $1`,
+        [extraction.id]
+      );
+    }
 
     await client.query('commit');
-    return { count: saved.length, products: saved };
+    return { count: saved.length, products: saved, newProducts };
   } catch (err) {
     await client.query('rollback');
     throw err;

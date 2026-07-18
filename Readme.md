@@ -33,15 +33,18 @@ start.bat         # Starts backend + frontend + ngrok
 
 ---
 
-## 1. Run the SQL migration (Supabase)
+## 1. Run the SQL migrations (Supabase)
 
 1. Create a project at [https://supabase.com](https://supabase.com).
-2. Open **SQL Editor** → paste [`migrations/001_init.sql`](migrations/001_init.sql) → Run.
+2. Open **SQL Editor** and run, in order:
+   - [`migrations/001_init.sql`](migrations/001_init.sql)
+   - [`migrations/002_vendor_product_master.sql`](migrations/002_vendor_product_master.sql)
 
 Or with `psql`:
 
 ```bash
 psql "postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres" -f migrations/001_init.sql
+psql "postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres" -f migrations/002_vendor_product_master.sql
 ```
 
 ---

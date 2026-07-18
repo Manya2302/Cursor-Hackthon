@@ -1,4 +1,4 @@
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../auth/AuthContext'
 import { APP_NAME } from '../brand'
 
 const STATS = [

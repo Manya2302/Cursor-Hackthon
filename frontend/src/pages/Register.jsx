@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../auth/AuthContext'
 import AuthShell from '../components/AuthShell'
 import { APP_NAME } from '../brand'
 
-const STEPS = ['Details', 'Verify OTP', 'Passcode', 'Password']
+const STEPS = ['Details', 'Verify OTP', 'WhatsApp', 'Password']
 
 export default function Register() {
   const { startRegistration, verifyOtp, setPassword, pendingOtp, clearPendingOtp } =
@@ -18,14 +18,14 @@ export default function Register() {
     phone: pendingOtp?.phone || '',
   })
   const [otp, setOtp] = useState('')
-  const [demoOtp, setDemoOtp] = useState(pendingOtp?.otp || '')
+  const [demoOtp, setDemoOtp] = useState(pendingOtp?.demoOtp || '')
   const [newUser, setNewUser] = useState(null)
+  const [whatsapp, setWhatsapp] = useState(null)
   const [password, setPasswordValue] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [copied, setCopied] = useState(false)
 
   function updateField(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -37,17 +37,8 @@ export default function Register() {
     setError('')
     setLoading(true)
     try {
-      if (!form.name.trim()) throw new Error('Please enter your name.')
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-        throw new Error('Please enter a valid email.')
-      }
-      const digits = form.phone.replace(/\D/g, '')
-      if (digits.length < 10)
-        throw new Error('Enter a valid phone number (at least 10 digits).')
-
-      await new Promise((r) => setTimeout(r, 450))
-      const { otp: sent } = startRegistration(form)
-      setDemoOtp(sent)
+      const { otp: sent } = await startRegistration(form)
+      setDemoOtp(sent || '')
       setStep(1)
     } catch (err) {
       setError(err.message)
@@ -61,24 +52,18 @@ export default function Register() {
     setError('')
     setLoading(true)
     try {
-      if (!/^\d{6}$/.test(otp.trim()))
-        throw new Error('Enter the 6-digit OTP from your email.')
-      await new Promise((r) => setTimeout(r, 400))
-      const user = verifyOtp(otp)
+      if (!/^\d{6}$/.test(otp.trim())) {
+        throw new Error('Enter the 6-digit OTP.')
+      }
+      const user = await verifyOtp(otp)
       setNewUser(user)
+      setWhatsapp(user.whatsapp || null)
       setStep(2)
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
-  }
-
-  function handleCopy() {
-    if (!newUser?.passcode) return
-    navigator.clipboard.writeText(newUser.passcode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1800)
   }
 
   async function handlePassword(e) {
@@ -88,11 +73,10 @@ export default function Register() {
     try {
       if (!newUser?.id) throw new Error('Account not found. Please register again.')
       if (password.length < 6) throw new Error('Password must be at least 6 characters.')
-      if (password !== confirmPassword)
+      if (password !== confirmPassword) {
         throw new Error('Password and confirm password do not match.')
-
-      await new Promise((r) => setTimeout(r, 350))
-      setPassword(newUser.id, password)
+      }
+      await setPassword(newUser.id, password)
       navigate('/login', { state: { phone: newUser.phone } })
     } catch (err) {
       setError(err.message)
@@ -101,10 +85,12 @@ export default function Register() {
     }
   }
 
+  const firstName = (newUser?.name || form.name || '').split(' ')[0] || 'there'
+
   return (
     <AuthShell
       title={`Create your ${APP_NAME} account`}
-      subtitle="Register, verify OTP, save your passcode, then set a password to log in."
+      subtitle="Enter your details, verify OTP, get a WhatsApp Hi, then set a login password."
       footer={
         <>
           Already registered? <Link to="/login">Log in with password</Link>
@@ -166,14 +152,14 @@ export default function Register() {
               inputMode="tel"
               autoComplete="tel"
               enterKeyHint="done"
-              placeholder="9876543210"
+              placeholder="9974099063"
               value={form.phone}
               onChange={(e) => updateField('phone', e.target.value)}
               required
             />
           </label>
           <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? 'Sending OTP…' : 'Send OTP to email'}
+            {loading ? 'Sending OTP…' : 'Request OTP'}
           </button>
         </form>
       )}
@@ -181,18 +167,18 @@ export default function Register() {
       {step === 1 && (
         <form className="auth-form" onSubmit={handleOtp} noValidate>
           <p className="form-note">
-            We sent a 6-digit OTP to{' '}
-            <strong>{pendingOtp?.email || form.email}</strong>.
+            Enter the OTP for <strong>{pendingOtp?.email || form.email}</strong>.
           </p>
-          <div className="demo-banner" role="status">
-            <span className="demo-label">Demo inbox</span>
-            <p>
-              OTP for <strong>{pendingOtp?.email || form.email}</strong>:{' '}
-              <code>{demoOtp}</code>
-            </p>
-          </div>
+          {demoOtp && (
+            <div className="demo-banner" role="status">
+              <span className="demo-label">Demo OTP</span>
+              <p>
+                Your OTP: <code>{demoOtp}</code>
+              </p>
+            </div>
+          )}
           <label className="field">
-            <span>Email OTP</span>
+            <span>OTP</span>
             <input
               className="otp-input"
               type="text"
@@ -231,18 +217,24 @@ export default function Register() {
       {step === 2 && newUser && (
         <div className="passcode-reveal">
           <p className="form-note success-note">
-            You&apos;re verified, {newUser.name.split(' ')[0]}. Save this
-            passcode, then set a password for login.
+            You&apos;re verified, {firstName}. We sent a WhatsApp hello to your
+            number.
           </p>
           <div className="passcode-box">
-            <span className="passcode-label">Your passcode</span>
-            <strong className="passcode-value">{newUser.passcode}</strong>
-            <button type="button" className="btn btn-secondary" onClick={handleCopy}>
-              {copied ? 'Copied' : 'Copy passcode'}
-            </button>
+            <span className="passcode-label">WhatsApp message</span>
+            <strong className="passcode-value" style={{ letterSpacing: '0.04em' }}>
+              Hi {firstName}
+            </strong>
+            <span style={{ fontSize: '0.85rem', opacity: 0.85 }}>
+              {whatsapp?.ok
+                ? `Sent via ${whatsapp.mode}`
+                : whatsapp?.error
+                  ? `Could not send yet: ${whatsapp.error}`
+                  : 'Sending…'}
+            </span>
           </div>
           <ul className="hint-list">
-            <li>Keep this passcode somewhere safe</li>
+            <li>Check WhatsApp on {newUser.phone}</li>
             <li>Next, create a password you&apos;ll use to log in</li>
           </ul>
           <button
@@ -261,8 +253,7 @@ export default function Register() {
       {step === 3 && newUser && (
         <form className="auth-form" onSubmit={handlePassword} noValidate>
           <p className="form-note">
-            Choose a password for <strong>{newUser.phone}</strong>. You&apos;ll
-            use phone + password to log in.
+            Choose a password for <strong>{newUser.phone}</strong>.
           </p>
           <label className="field">
             <span>Password</span>
@@ -315,7 +306,7 @@ export default function Register() {
               setError('')
             }}
           >
-            Back to passcode
+            Back
           </button>
         </form>
       )}

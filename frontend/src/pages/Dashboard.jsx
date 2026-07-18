@@ -8,11 +8,49 @@ const STATS = [
 ]
 
 const ACTIVITY = [
-  { type: 'Sale', detail: 'Kirana order — 12 items', amount: '+₹2,340', time: '10:42' },
-  { type: 'Payment', detail: 'Received from Ramesh Traders', amount: '+₹5,000', time: '09:15' },
-  { type: 'Purchase', detail: 'Stock restock — oil & flour', amount: '−₹3,800', time: 'Yesterday' },
-  { type: 'Voice', detail: 'WhatsApp note parsed by LedgerBot AI', amount: 'Pending', time: 'Yesterday' },
+  {
+    type: 'Sale',
+    detail: 'Kirana order — 12 items',
+    amount: '+₹2,340',
+    time: '10:42',
+    tone: 'in',
+  },
+  {
+    type: 'Payment',
+    detail: 'Received from Ramesh Traders',
+    amount: '+₹5,000',
+    time: '09:15',
+    tone: 'in',
+  },
+  {
+    type: 'Purchase',
+    detail: 'Stock restock — oil & flour',
+    amount: '−₹3,800',
+    time: 'Yesterday',
+    tone: 'out',
+  },
+  {
+    type: 'Voice',
+    detail: 'WhatsApp note parsed by LedgerBot AI',
+    amount: 'Pending',
+    time: 'Yesterday',
+    tone: 'pending',
+  },
 ]
+
+const COMMANDS = [
+  { code: '/ai-order', desc: 'Log a sale from text, voice, or photo' },
+  { code: '/ai-stock', desc: 'Update inventory' },
+  { code: '/ai-payment', desc: 'Record money in or out' },
+  { code: '/ai-report', desc: 'Ask for a quick summary' },
+]
+
+function initials(name = '') {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return 'LB'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+}
 
 export default function Dashboard() {
   const { session, logout } = useAuth()
@@ -26,6 +64,9 @@ export default function Dashboard() {
           <span className="brand-name">LedgerBot</span>
         </div>
         <div className="dash-user">
+          <div className="dash-avatar" aria-hidden="true">
+            {initials(session?.name)}
+          </div>
           <div className="dash-user-meta">
             <strong>{session?.name}</strong>
             <span>{session?.phone}</span>
@@ -41,8 +82,8 @@ export default function Dashboard() {
           <p className="dash-eyebrow">Your books</p>
           <h1>Good day, {firstName}</h1>
           <p className="dash-lead">
-            Your invisible AI accountant is ready. Send WhatsApp messages, voice notes, or photos —
-            LedgerBot keeps the ledger tallied.
+            Your invisible AI accountant is ready. Send WhatsApp messages, voice
+            notes, or photos — LedgerBot keeps the ledger tallied.
           </p>
         </section>
 
@@ -64,12 +105,14 @@ export default function Dashboard() {
           <ul className="activity-list">
             {ACTIVITY.map((item) => (
               <li key={`${item.type}-${item.time}-${item.detail}`}>
-                <div>
-                  <strong>{item.type}</strong>
+                <div className="activity-body">
+                  <span className={`activity-type tone-${item.tone}`}>{item.type}</span>
                   <p>{item.detail}</p>
                 </div>
                 <div className="activity-meta">
-                  <span className="activity-amount">{item.amount}</span>
+                  <span className={`activity-amount tone-${item.tone}`}>
+                    {item.amount}
+                  </span>
                   <time>{item.time}</time>
                 </div>
               </li>
@@ -81,25 +124,29 @@ export default function Dashboard() {
           <h2>WhatsApp shortcuts</h2>
           <p>Use these commands in chat once your number is linked.</p>
           <ul className="command-list">
-            <li>
-              <code>/ai-order</code>
-              <span>Log a sale from text, voice, or photo</span>
-            </li>
-            <li>
-              <code>/ai-stock</code>
-              <span>Update inventory</span>
-            </li>
-            <li>
-              <code>/ai-payment</code>
-              <span>Record money in or out</span>
-            </li>
-            <li>
-              <code>/ai-report</code>
-              <span>Ask for a quick summary</span>
-            </li>
+            {COMMANDS.map((cmd) => (
+              <li key={cmd.code}>
+                <code>{cmd.code}</code>
+                <span>{cmd.desc}</span>
+              </li>
+            ))}
           </ul>
         </section>
       </main>
+
+      <nav className="dash-mobile-bar" aria-label="Quick actions">
+        <a
+          className="btn btn-primary dash-wa-cta"
+          href="https://wa.me/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open WhatsApp
+        </a>
+        <button type="button" className="btn btn-outline btn-sm" onClick={logout}>
+          Log out
+        </button>
+      </nav>
     </div>
   )
 }

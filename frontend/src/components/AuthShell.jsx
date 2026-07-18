@@ -9,8 +9,8 @@ export default function AuthShell({ title, subtitle, footer, children }) {
             <h1 className="brand-name">LedgerBot</h1>
           </div>
           <p className="brand-tagline">
-            An invisible AI accountant that lives inside WhatsApp — books for kiranas,
-            workshops, and small shops.
+            An invisible AI accountant that lives inside WhatsApp — books for
+            kiranas, workshops, and small shops.
           </p>
           <ul className="brand-points">
             <li>Message in. Ledger out.</li>
@@ -19,9 +19,13 @@ export default function AuthShell({ title, subtitle, footer, children }) {
           </ul>
         </aside>
 
-        <section className="auth-panel">
+        <section className="auth-panel" aria-labelledby="auth-panel-title">
           <header className="auth-panel-head">
-            <h2>{title}</h2>
+            <p className="auth-mobile-brand">
+              <span className="brand-mark brand-mark-sm" aria-hidden="true" />
+              <span>LedgerBot</span>
+            </p>
+            <h2 id="auth-panel-title">{title}</h2>
             <p>{subtitle}</p>
           </header>
           {children}

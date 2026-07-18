@@ -1,4 +1,5 @@
 import { useAuth } from '../context/AuthContext'
+import { APP_NAME } from '../brand'
 
 const STATS = [
   { label: 'Cash in hand', value: '₹42,850', hint: 'Today' },
@@ -31,7 +32,7 @@ const ACTIVITY = [
   },
   {
     type: 'Voice',
-    detail: 'WhatsApp note parsed by NIRVHA AI',
+    detail: `WhatsApp note parsed by ${APP_NAME} AI`,
     amount: 'Pending',
     time: 'Yesterday',
     tone: 'pending',
@@ -61,7 +62,7 @@ export default function Dashboard() {
       <header className="dash-header">
         <div className="brand brand-inline">
           <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-name">NIRVHA</span>
+          <span className="brand-name">{APP_NAME}</span>
         </div>
         <div className="dash-user">
           <div className="dash-avatar" aria-hidden="true">
@@ -83,7 +84,7 @@ export default function Dashboard() {
           <h1>Good day, {firstName}</h1>
           <p className="dash-lead">
             Your invisible AI accountant is ready. Send WhatsApp messages, voice
-            notes, or photos — NIRVHA keeps the ledger tallied.
+            notes, or photos — {APP_NAME} keeps the ledger tallied.
           </p>
         </section>
 

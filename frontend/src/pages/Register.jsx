@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import AuthShell from '../components/AuthShell'
+import { APP_NAME } from '../brand'
 
 const STEPS = ['Details', 'Verify OTP', 'Passcode', 'Password']
 
@@ -102,7 +103,7 @@ export default function Register() {
 
   return (
     <AuthShell
-      title="Create your NIRVHA account"
+      title={`Create your ${APP_NAME} account`}
       subtitle="Register, verify OTP, save your passcode, then set a password to log in."
       footer={
         <>

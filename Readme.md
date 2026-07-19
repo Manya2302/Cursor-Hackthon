@@ -26,7 +26,8 @@ NIRVHA lets small business owners — kirana stores, small manufacturers, coachi
 
 ```
 backend/          # WhatsApp webhook + AI agent
-frontend/         # React web UI (college teammate)
+frontend/         # React web UI
+auth/             # Register / OTP / login API
 migrations/       # Postgres schema
 start.bat         # Starts backend + frontend + ngrok
 ```
@@ -85,7 +86,7 @@ npm run dev
 
 Open **http://localhost:5173** — register / login / dashboard.
 
-Or run everything with `start.bat` (backend + frontend + ngrok).
+Or run everything with `start.bat` (backend + frontend + ngrok for WhatsApp).
 
 - Health: `GET http://localhost:3000/` → `{ "status": "ok" }`
 - Webhook verify: `GET http://localhost:3000/webhook?...` (configured by Meta)

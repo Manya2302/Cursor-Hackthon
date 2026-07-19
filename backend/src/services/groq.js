@@ -616,31 +616,28 @@ async function ocrImageText(imageBuffer, mimeType = 'image/jpeg') {
 async function runBillVision(dataUrl, strictRetry = false) {
   const prompt = strictRetry
     ? 'STRICT OCR. Keep image language (en/gu). Read the ENTIRE table top to bottom, every row.\n' +
-      'The bill table usually has 3 plain columns: Item | Quantity | Price.\n' +
-      'The Item column is often JUST a product name (e.g. "Ghee", "Sugar", "Milk") with NO weight/pack written — do NOT invent a pack size like "1kg" if none is written.\n' +
-      'Quantity is a plain count (e.g. 1, 2). Price is the rupee amount for that row.\n' +
-      'If the Item text DOES include an explicit pack (e.g. "Ghee - 500gm"), keep it in ItemName exactly as written.\n' +
-      'Output EXACTLY one line per row as: ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <price>\n' +
-      'Example table Ghee|1|200, Sugar|2|250, Milk|1|52 →\n' +
-      'ITEM: Ghee | WEIGHT: 1 | AMOUNT: 200\nITEM: Sugar | WEIGHT: 2 | AMOUNT: 250\nITEM: Milk | WEIGHT: 1 | AMOUNT: 52\n' +
-      'Also: LANG / NAME / NUMBER / TOTAL. Never invent, never skip a row, never duplicate.'
+      'The bill table usually has 3 columns: Item | Quantity | Price.\n' +
+      'Price = RATE for ONE unit (not the line total). Example: Maggi | 5 | 50 means 5 pieces at ₹50 each.\n' +
+      'Do NOT invent a pack size like "1kg" if none is written.\n' +
+      'Output EXACTLY one line per row as: ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <unitRate>\n' +
+      'Example Maggi|5|50 → ITEM: Maggi | WEIGHT: 5 | AMOUNT: 50\n' +
+      'Example Ghee|1|200 → ITEM: Ghee | WEIGHT: 1 | AMOUNT: 200\n' +
+      'Also: LANG / NAME / NUMBER / TOTAL (= sum of qty×rate). Never invent, never skip a row, never duplicate.'
     : 'OCR handwritten kirana bill. Detect LANG en|gu. Read the ENTIRE table top to bottom, every row.\n' +
       'Header: Name + Number (usually the first 2 lines above the table).\n' +
-      'The table usually has 3 plain columns: Item | Quantity | Price.\n' +
-      'The Item column is often JUST a product name (e.g. "Ghee", "Sugar", "Milk") with NO weight/pack written — do NOT invent a pack size like "1kg" if none is written in that cell.\n' +
-      'Quantity is a plain count (e.g. 1, 2, 3). Price is the rupee amount for that row (not a per-unit price unless quantity is 1).\n' +
-      'If the Item text DOES include an explicit pack (e.g. "Ghee - 500gm"), keep it in ItemName exactly as written.\n' +
-      'Output EXACTLY one line per row as: ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <price>\n' +
-      'Example — table reads Ghee|1|200, Sugar|2|250, Milk|1|52 →\n' +
+      'The table usually has 3 columns: Item | Quantity | Price.\n' +
+      'Price = RATE for ONE unit (per piece / per kg), NOT the line total.\n' +
+      'Example: Maggi | 5 | 50 means quantity=5 and rate=₹50 each (line total will be 5×50=250 in code).\n' +
+      'Do NOT invent a pack size like "1kg" if none is written in the Item cell.\n' +
+      'Output EXACTLY one line per row as: ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <unitRate>\n' +
+      'Examples:\n' +
+      'ITEM: Maggi | WEIGHT: 5 | AMOUNT: 50\n' +
       'ITEM: Ghee | WEIGHT: 1 | AMOUNT: 200\n' +
-      'ITEM: Sugar | WEIGHT: 2 | AMOUNT: 250\n' +
-      'ITEM: Milk | WEIGHT: 1 | AMOUNT: 52\n' +
-      'If a row instead shows an explicit pack, e.g. Sugar - 500gm | 2 | 250, output:\n' +
-      'ITEM: Sugar - 500gm | WEIGHT: 2 | AMOUNT: 250\n' +
-      'Rules: read every row; never skip a row; never invent a row; never duplicate; Price column = amount for that row.\n' +
+      'ITEM: Sugar | WEIGHT: 2 | AMOUNT: 45\n' +
+      'Rules: read every row; never skip; never invent; never duplicate.\n' +
       'Output ONLY:\n' +
       'LANG: en|gu\nNAME: ...\nNAME_EN: ...\nNUMBER: ...\n' +
-      'ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <price>\nTOTAL: digits';
+      'ITEM: <ItemName> | WEIGHT: <quantity> | AMOUNT: <unitRate>\nTOTAL: digits';
 
   return chatCompletion({
     model: VISION_MODEL,

@@ -134,25 +134,40 @@ function parseInvoiceFromStructuredOcr(ocrText) {
     const name = m[1].trim();
     const quantity = /^UNREADABLE$/i.test(m[2].trim()) ? null : m[2].trim();
     const priceRaw = m[3].trim();
-    const price = /^UNREADABLE$/i.test(priceRaw)
+    const priceNum = /^UNREADABLE$/i.test(priceRaw)
       ? null
       : Number(String(priceRaw).replace(/[^\d.]/g, ''));
     const count =
       m[4] != null && !/^UNREADABLE$/i.test(String(m[4]).trim())
         ? Number(String(m[4]).replace(/[^\d.]/g, ''))
         : null;
-    const unitPrice =
+    const unitPriceExplicit =
       m[5] != null && !/^UNREADABLE$/i.test(String(m[5]).trim())
         ? Number(String(m[5]).replace(/[^\d.]/g, ''))
         : null;
     if (!name || /^UNREADABLE$/i.test(name)) continue;
+
+    // Plain qty + AMOUNT without UNIT_PRICE → AMOUNT is unit rate
+    const qtyNum =
+      count != null && Number.isFinite(count)
+        ? count
+        : quantity && /^\d+(?:\.\d+)?$/.test(quantity)
+          ? Number(quantity)
+          : null;
+    let unit_price = Number.isFinite(unitPriceExplicit) ? unitPriceExplicit : null;
+    let price = Number.isFinite(priceNum) ? priceNum : null;
+    if (unit_price == null && qtyNum != null && qtyNum > 0 && price != null) {
+      unit_price = price;
+      price = Math.round(qtyNum * unit_price * 100) / 100;
+    }
+
     items.push({
       name,
-      quantity: count != null ? String(count) : quantity,
-      price: Number.isFinite(price) ? price : null,
-      unit_price: Number.isFinite(unitPrice) ? unitPrice : null,
+      quantity: qtyNum != null ? String(qtyNum) : quantity,
+      price,
+      unit_price,
       weight_text: quantity,
-      count: Number.isFinite(count) ? count : null,
+      count: qtyNum,
     });
   }
 

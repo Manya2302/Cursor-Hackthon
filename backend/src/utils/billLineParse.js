@@ -1,14 +1,14 @@
 /**
  * Parse kirana bill lines.
  *
- * Supported forms:
- *   Ghee1kg-6-3000
- *   Maggi250 gm - 7-4000
- *   Ghee-1kg-1-200          (product-pack-count-lineTotal)
- *   Ghee - 1kg | 1 | 200    (table: item+pack, qty, price)
- *   ITEM: Sugar-500gm-2-250
+ * Table columns are: Item | Quantity | Rate (unit price).
+ * Line total = quantity × rate (JS math only — never trust the LLM for this).
  *
- * Unit price for one pack = line_total / count (JS math only).
+ * Supported forms:
+ *   Maggi | 5 | 50          → count 5, unit_price 50, line_amount 250
+ *   ITEM: Maggi | WEIGHT: 5 | AMOUNT: 50
+ *   Ghee1kg-6-3000          → pack + count + lineTotal (legacy dash form)
+ *   Ghee-1kg-1-200
  */
 
 const { normalizeUnit, roundMoney } = require('./units');
@@ -32,8 +32,9 @@ function parseDashBillLine(rawLine) {
   if (structured) {
     const namePart = structured[1].trim();
     const weightPart = String(structured[2] || '').trim();
-    const amount = Number(String(structured[3]).replace(/[^\d.]/g, ''));
+    const amountRaw = Number(String(structured[3]).replace(/[^\d.]/g, ''));
     const countM = raw.match(/\|\s*COUNT\s*:\s*(\d+(?:\.\d+)?)/i);
+    const unitPriceM = raw.match(/\|\s*UNIT_PRICE\s*:\s*([^\|]+)/i);
     const weightIsPack = new RegExp(
       `\\d+(?:\\.\\d+)?\\s*(?:${PACK_UNIT})`,
       'i'
@@ -51,14 +52,32 @@ function parseDashBillLine(rawLine) {
     if (count == null) count = 1;
     if (weightIsPack) packHint = weightPart;
 
-    if (Number.isFinite(amount) && amount >= 0 && namePart) {
-      return buildParsed(
+    if (!Number.isFinite(amountRaw) || amountRaw < 0 || !namePart) {
+      // fall through to other parsers
+    } else {
+      // Kirana table: Item | Qty | Rate → AMOUNT is unit rate, line = qty × rate.
+      // After normalize, lines include UNIT_PRICE and AMOUNT is already line total — don't multiply again.
+      let lineAmount = amountRaw;
+      let unitPriceOverride = null;
+      if (unitPriceM) {
+        const up = Number(String(unitPriceM[1]).replace(/[^\d.]/g, ''));
+        if (Number.isFinite(up)) unitPriceOverride = up;
+      } else if (!weightIsPack && count > 0) {
+        unitPriceOverride = amountRaw;
+        lineAmount = roundMoney(count * amountRaw);
+      }
+
+      const parsed = buildParsed(
         packHint && !/\d/.test(namePart) ? `${namePart} ${packHint}` : namePart,
         packHint,
         count,
-        amount,
+        lineAmount,
         raw
       );
+      if (parsed && unitPriceOverride != null) {
+        parsed.unit_price = roundMoney(unitPriceOverride);
+      }
+      if (parsed) return parsed;
     }
   }
 
@@ -117,12 +136,18 @@ function parseDashBillLine(rawLine) {
     }
   }
 
-  // D) table row with pipes: Ghee - 1kg | 1 | 200
+  // D) table row with pipes: Maggi | 5 | 50  (qty | unit rate)
   m = line.match(
     /^(.+?)\s*\|\s*(\d+(?:\.\d+)?)\s*\|\s*(\d+(?:\.\d+)?)\s*$/
   );
   if (m) {
-    return buildParsed(m[1], null, Number(m[2]), Number(m[3]), raw);
+    const count = Number(m[2]);
+    const rate = Number(m[3]);
+    const parsed = buildParsed(m[1], null, count, roundMoney(count * rate), raw);
+    if (parsed) {
+      parsed.unit_price = roundMoney(rate);
+      return parsed;
+    }
   }
 
   // E) "Ghee - 1kg  1  200" (spaces)

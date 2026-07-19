@@ -6,7 +6,7 @@
 **Prep (once):**
 1. Refresh Meta temporary WhatsApp token in `backend/.env` if older than ~20h.
 2. Confirm Meta webhook URL: `https://king-snowstorm-roundworm.ngrok-free.dev/webhook` (verify token `manya123`).
-3. Run backend + ngrok: `start-backend.bat` (or `start.bat` for frontend too).
+3. Run backend + frontend + ngrok: `start.bat`.
 4. Seed demo books (optional but recommended for judges):
    ```bash
    cd backend

@@ -34,6 +34,7 @@ const GUJARATI_ITEM_LEXICON = [
   { gu: 'મીઠું', en: 'Salt', aliases: ['મીઠું', 'મીઠુ'] },
   { gu: 'આટો', en: 'Flour', aliases: ['આટો', 'આટા'] },
   { gu: 'ચોખા', en: 'Rice', aliases: ['ચોખા'] },
+  { gu: 'મેગી', en: 'Maggi', aliases: ['મેગી', 'maggi', 'maggie', 'मैगी'] },
 ];
 
 /**

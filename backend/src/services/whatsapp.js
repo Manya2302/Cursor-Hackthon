@@ -1,4 +1,4 @@
-const GRAPH_API_BASE = 'https://graph.facebook.com/v17.0';
+const GRAPH_API_BASE = 'https://graph.facebook.com/v21.0';
 const WHATSAPP_TEXT_LIMIT = 4000; // Meta hard limit is 4096; leave headroom
 
 function getToken() {
@@ -59,6 +59,17 @@ async function sendOneTextMessage(to, text, phoneNumberId, token, id) {
     if (body?.error?.code === 190) {
       console.error(
         '[whatsapp] → Access token expired/invalid. Open Meta Developer → WhatsApp → API Setup, copy a NEW Temporary access token into backend/.env as WHATSAPP_TOKEN, then restart.'
+      );
+    }
+    if (body?.error?.code === 131005) {
+      console.error(
+        '[whatsapp] → (#131005) Access denied on SEND.\n' +
+          '   Temporary USER tokens often fail here even when scopes look correct.\n' +
+          '   Fix: Meta Business Suite → Business settings → Users → System users →\n' +
+          '   Create Admin system user → Add assets (App + WhatsApp account: Full control) →\n' +
+          '   Generate token with whatsapp_business_messaging + whatsapp_business_management →\n' +
+          '   Paste into backend/.env as WHATSAPP_TOKEN and restart backend.\n' +
+          '   Also confirm your personal number is in WhatsApp → API Setup → To allowlist.'
       );
     }
     if (body?.error) {
